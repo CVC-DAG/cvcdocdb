@@ -27,6 +27,8 @@ import time
 import urllib.request
 from typing import Any, Dict, List, Optional, Set, Tuple
 
+from cvcdocdb.neo4j_graph import _validate_cypher_identifier
+
 try:
     import rdflib
     from rdflib import RDF, RDFS, OWL, Graph, URIRef, Literal, Namespace
@@ -570,28 +572,25 @@ def _import_nodes_via_cypher(
     count = 0
     for node in nodes:
         node_id = node["id"]
+        # Labels come from the fixed RDF_TO_LABEL mapping, not from RDF
+        # content directly, but validate anyway before splicing them as
+        # bare Cypher identifiers (labels/relationship types cannot be
+        # parameterized in Cypher).
+        for lbl in node["labels"]:
+            _validate_cypher_identifier(lbl, "label")
         labels = ":".join(node["labels"])
 
-        # Build SET clause from properties
-        set_parts = []
-        for prop_name, prop_val in node["properties"].items():
-            if isinstance(prop_val, list):
-                # List values: set as array
-                items = ", ".join(f'"{v}"' for v in prop_val)
-                set_parts.append(f'n.`{prop_name}` = [{items}]')
-            else:
-                escaped = prop_val.replace('"', '\\"')
-                set_parts.append(f'n.`{prop_name}` = "{escaped}"')
+        # node_id and property names/values originate from the downloaded
+        # RDF/XML content and are not trusted. Pass them as query
+        # parameters instead of splicing them into the query text.
+        props: Dict[str, Any] = dict(node["properties"])
 
-        if set_parts:
-            set_clause = " SET " + " ".join(set_parts)
-        else:
-            set_clause = ""
-
-        query = f"MERGE (n:{labels} {{id: \"{node_id}\"}}){set_clause}"
+        query = f"MERGE (n:{labels} {{id: $node_id}})"
+        if props:
+            query += " SET n += $props"
 
         try:
-            graph.query(query)
+            graph.query(query, params={"node_id": node_id, "props": props})
             count += 1
         except Exception:
             # Skip nodes that fail (e.g., constraint violations)
@@ -628,14 +627,20 @@ def _import_rels_via_cypher(
         src_label = rel.get("src_label", "Node")
         dst_label = rel.get("dst_label", "Node")
 
+        # rel_type/labels come from the fixed RELATION_MAP mapping, but
+        # validate before splicing as bare Cypher identifiers. src_id/dst_id
+        # come from RDF content and are passed as query parameters instead.
+        for identifier in (rel_type, src_label, dst_label):
+            _validate_cypher_identifier(identifier, "label/relation type")
+
         query = (
-            f"MATCH (a:{src_label} {{id: \"{src_id}\"}}) "
-            f"MATCH (b:{dst_label} {{id: \"{dst_id}\"}}) "
+            f"MATCH (a:{src_label} {{id: $src_id}}) "
+            f"MATCH (b:{dst_label} {{id: $dst_id}}) "
             f"MERGE (a)-[r:{rel_type}]->(b)"
         )
 
         try:
-            graph.query(query)
+            graph.query(query, params={"src_id": src_id, "dst_id": dst_id})
             count += 1
         except Exception:
             # Skip relationships that fail (e.g., nodes not yet found)
