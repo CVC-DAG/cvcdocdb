@@ -1480,6 +1480,34 @@ class Neo4jGraphTest(unittest.TestCase):
             graph.insertNode(node, replace=True)
         graph.close()
 
+    def test_insert_node_rejects_malicious_alternative_label(self) -> None:
+        """An alternative_labels entry crafted to break out of a Cypher
+        label position must be rejected, not just main_label."""
+        graph = self._make_graph()
+        node = Node(
+            pk={"id": 1},
+            main_label="A",
+            alternative_labels=['Evil) DETACH DELETE n //'],
+        )
+        with self.assertRaises(ValueError):
+            graph.insertNode(node, replace=True)
+        graph.close()
+
+    def test_insert_node_rejects_malicious_dependency_label(self) -> None:
+        """A dependency node's main_label is inserted via the internal
+        _insertNode path directly, bypassing insertNode's own check — it
+        must still be validated."""
+        graph = self._make_graph()
+        dep = Node(pk={"id": 2}, main_label='Evil) DETACH DELETE n //', value="x")
+        node = Node(
+            pk={"id": 1},
+            main_label="A",
+            dependencies={"has_value": dep},
+        )
+        with self.assertRaises(ValueError):
+            graph.insertNode(node, replace=True)
+        graph.close()
+
     def test_insert_relation_rejects_malicious_rel_type(self) -> None:
         """A relation type crafted to break out of a Cypher relation-type
         position must be rejected before any query is built."""
