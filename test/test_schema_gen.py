@@ -130,7 +130,7 @@ class GenerateClassesTest(unittest.TestCase):
         source = generate_classes(self._yaml())
         # Section is WeakNode of Document
         self.assertIn("parent=parent", source)
-        self.assertIn('parent_relation="HAS_SECTION"', source)
+        self.assertIn("parent_relation='HAS_SECTION'", source)
 
     def test_empty_schema(self) -> None:
         """Empty schema generates minimal valid Python."""
@@ -201,6 +201,71 @@ class GenerateFileTest(unittest.TestCase):
                 compile(f.read(), out_path, "exec")
         finally:
             shutil.rmtree(output_dir, ignore_errors=True)
+
+
+# ---------------------------------------------------------------------------
+# Security: schema-derived values must not be able to inject code
+# ---------------------------------------------------------------------------
+
+
+class SchemaGenSecurityTest(unittest.TestCase):
+    """A malicious/untrusted YAML schema (e.g. from an RDF ontology's
+    rdfs:comment) must never be able to inject executable Python into the
+    generated source, and schema-derived identifiers must be validated.
+    """
+
+    def test_malicious_doc_cannot_break_out_of_docstring(self) -> None:
+        """A doc value containing an embedded triple-quote must not let
+        attacker-chosen statements execute when the generated file runs."""
+        malicious_doc = 'A"""\n    globals()["PWNED"] = True\n    x = "'
+        data = {
+            "labels": {
+                "Evil": {
+                    "class_name": "Evil",
+                    "doc": malicious_doc,
+                    "properties": {},
+                    "primary_key": [],
+                }
+            }
+        }
+        yaml_source = yaml.safe_dump(data)
+        source = generate_classes(yaml_source)
+
+        namespace: dict = {}
+        exec(compile(source, "<generated>", "exec"), namespace)
+        self.assertNotIn("PWNED", namespace)
+
+    def test_invalid_class_name_is_rejected(self) -> None:
+        """A class_name that isn't a valid Python identifier must be rejected,
+        not spliced into `class ...(Node):` verbatim."""
+        data = {
+            "labels": {
+                "Bad": {
+                    "class_name": "Evil):\n    pass\nimport os\nclass Evil2(Node",
+                    "properties": {},
+                    "primary_key": [],
+                }
+            }
+        }
+        yaml_source = yaml.safe_dump(data)
+        with self.assertRaises(ValueError):
+            generate_classes(yaml_source)
+
+    def test_invalid_property_name_is_rejected(self) -> None:
+        """A property name that isn't a valid Python identifier must be
+        rejected, not spliced into `self.<name> = ...` verbatim."""
+        data = {
+            "labels": {
+                "Good": {
+                    "class_name": "Good",
+                    "properties": {"x = 1\nimport os\nos.system('id')\nself.y": "v"},
+                    "primary_key": [],
+                }
+            }
+        }
+        yaml_source = yaml.safe_dump(data)
+        with self.assertRaises(ValueError):
+            generate_classes(yaml_source)
 
 
 if __name__ == "__main__":

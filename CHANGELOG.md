@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **Package renamed `drm` → `cvcdocdb`** — the source package directory, all
+  imports, `setup.py` metadata (`drm-tools` → `cvcdocdb`), docs, and example
+  scripts now use the `cvcdocdb` name throughout, matching the project's
+  actual distribution name. Older changelog entries below still reference
+  `drm/...` paths as they existed at the time; they are left as a historical
+  record rather than rewritten.
+
 ## [1.1.0a3] - 2026-07-11
 
 ### Changed

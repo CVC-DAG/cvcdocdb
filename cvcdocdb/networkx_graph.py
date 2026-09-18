@@ -1314,11 +1314,24 @@ class NetworkXGraph(GraphStore):
     # ------------------------------------------------------------------
 
     def _default_persistence_path(self) -> str:
-        """Build a deterministic persistence path for the current workspace."""
+        """Build a deterministic persistence path for the current workspace.
+
+        Uses a per-user, permission-restricted cache directory rather than
+        the shared system temp dir: a predictable filename inside a
+        world-writable temp dir would let another local user pre-plant a
+        malicious pickle file for us to unpickle (see _load_state).
+        """
         workspace = os.path.abspath(os.getcwd())
         workspace_hash = hashlib.sha1(workspace.encode("utf-8")).hexdigest()[:12]
-        filename = f"drm_networkx_graph_{workspace_hash}.pkl"
-        return os.path.join(tempfile.gettempdir(), filename)
+        filename = f"cvcdocdb_networkx_graph_{workspace_hash}.pkl"
+        cache_dir = os.path.join(os.path.expanduser("~"), ".cache", "cvcdocdb")
+        os.makedirs(cache_dir, mode=0o700, exist_ok=True)
+        if hasattr(os, "chmod"):
+            try:
+                os.chmod(cache_dir, 0o700)
+            except OSError:
+                pass
+        return os.path.join(cache_dir, filename)
 
     def _save_state(self) -> None:
         """Persist the full graph store state atomically."""
@@ -1352,9 +1365,23 @@ class NetworkXGraph(GraphStore):
             os.rename(tmp_path, self._persistence_path)
 
     def _load_state(self) -> None:
-        """Load graph store state from disk if present."""
+        """Load graph store state from disk if present.
+
+        Refuses to unpickle a file that isn't owned by the current user —
+        defense in depth against a malicious pickle pre-planted at a
+        predictable path by another local user (see also
+        _default_persistence_path, which avoids the shared temp dir).
+        """
         if not os.path.exists(self._persistence_path):
             return
+        if hasattr(os, "getuid"):
+            file_uid = os.stat(self._persistence_path).st_uid
+            if file_uid != os.getuid():
+                raise RuntimeError(
+                    f"Refusing to load {self._persistence_path!r}: "
+                    f"it is not owned by the current user (uid {os.getuid()}, "
+                    f"file owned by uid {file_uid})."
+                )
         with open(self._persistence_path, "rb") as fh:
             state = pickle.load(fh)
         self._graph = state.get("graph", nx.MultiDiGraph())
@@ -1800,6 +1827,8 @@ def _execute_cypher(
     for clause_type, clause_body in clauses:
         if clause_type == "match":
             state = _exec_match(state, clause_body)
+        elif clause_type == "merge":
+            state = _exec_merge(state, clause_body)
         elif clause_type == "create":
             state = _exec_create(state, clause_body)
         elif clause_type == "delete":
@@ -1834,7 +1863,7 @@ def _substitute_params(cypher: str, params: _Dict[str, _Any]) -> str:
 
 def _parse_cypher(cypher: str) -> _List[_Tuple[str, str]]:
     """Split a Cypher query into (clause_type, clause_body) pairs."""
-    parts = _re.split(r"\s+(?=MATCH\s|CREATE\s|DELETE\s|DETACH\sDELETE\s|SET\s|WITH\s|RETURN\s|LIMIT\s)", cypher, flags=_re.IGNORECASE)
+    parts = _re.split(r"\s+(?=MATCH\s|MERGE\s|CREATE\s|DELETE\s|DETACH\sDELETE\s|SET\s|WITH\s|RETURN\s|LIMIT\s)", cypher, flags=_re.IGNORECASE)
     result = []
     for part in parts:
         part = part.strip()
@@ -1843,6 +1872,8 @@ def _parse_cypher(cypher: str) -> _List[_Tuple[str, str]]:
         upper = part.upper()
         if upper.startswith("MATCH "):
             result.append(("match", part[6:].strip()))
+        elif upper.startswith("MERGE "):
+            result.append(("merge", part[6:].strip()))
         elif upper.startswith("CREATE "):
             result.append(("create", part[7:].strip()))
         elif upper.startswith("DETACH DELETE "):
@@ -2000,7 +2031,8 @@ def _exec_match(
     # Generate bindings based on pattern
     new_bindings = []
     if not nodes_found:
-        return {"bindings": [], "graph": graph, "next_label": state["next_label"]}
+        # No new nodes found — pass through existing bindings unchanged
+        return {"bindings": bindings, "graph": graph, "next_label": state["next_label"]}
 
     # Handle edge patterns
     if edge_specs:
@@ -2067,14 +2099,193 @@ def _exec_match(
             row = {var_name: _resolve_node(graph, nid)}
             new_bindings.append(row)
 
+    # Merge with existing bindings from previous MATCH clauses
+    merged: _List[_Dict[str, _Any]] = []
+    for existing in bindings:
+        for row in new_bindings:
+            merged.append({**existing, **row})
+    if not merged:
+        merged = new_bindings  # No previous bindings — use new ones
+
     # Apply WHERE clause
     if where_clause:
-        new_bindings = _apply_where(new_bindings, where_clause, graph)
+        merged = _apply_where(merged, where_clause, graph)
 
     return {
-        "bindings": new_bindings,
+        "bindings": merged,
         "graph": graph,
         "next_label": state["next_label"],
+    }
+
+
+def _exec_merge(
+    state: _Dict[str, _Any], body: str
+) -> _Dict[str, _Any]:
+    """Execute a MERGE clause (MATCH + CREATE if not found).
+
+    MERGE tries to find a matching node/edge; if not found, creates it.
+    Supports patterns like:
+      (n:Label {prop: val})                          — node merge
+      (a)-[r:REL_TYPE]->(b)                          — edge merge (uses bindings)
+      (a:LabelA {props})-[r:REL_TYPE]->(b:LabelB {props})  — full pattern
+    """
+    graph = state["graph"]
+    next_label = state["next_label"]
+    bindings = state["bindings"]
+
+    # Extract WHERE clause
+    where_clause = ""
+    if " WHERE " in body.upper():
+        idx = body.upper().index(" WHERE ")
+        where_clause = body[idx + 6:].strip()
+        pattern = body[:idx].strip()
+    else:
+        pattern = body.strip()
+
+    # Detect edge pattern: (src)-[rel]->(dst) or (src)-[rel]-(dst)
+    # Format: (var:Label {props})-[var:TYPE]->(var:Label {props})
+    edge_spec_pattern = _re.compile(
+        r"\((\w+)(?::(\w+))?\s*(\{[^}]*\})?\)"
+        r"\s*-\s*\[([\w]*)\s*(?::(\w+))?\]\s*-*\s*->?\s*"
+        r"\((\w+)(?::(\w+))?\s*(\{[^}]*\})?\)"
+    )
+    edge_matches = list(edge_spec_pattern.finditer(pattern))
+
+    # Parse standalone node patterns: (var:Label {props})
+    node_pattern = _re.compile(r"\((\w+)(?::(\w+))?\s*(\{[^}]*\})?\)")
+    node_matches = list(node_pattern.finditer(pattern))
+
+    # Build a map of node variable -> spec
+    nodes_found: _Dict[str, _Dict[str, _Any]] = {}
+    for m in node_matches:
+        var_name = m.group(1)
+        label = m.group(2) or "Node"
+        props_str = m.group(3) or ""
+        props = _parse_props(props_str)
+        nodes_found[var_name] = {"label": label, "props": props}
+
+    # Track variable -> node dict mapping
+    var_node_map: _Dict[str, _Dict[str, _Any]] = {}
+
+    if edge_matches:
+        # ── Edge MERGE: (a)-[r:REL]->(b) ──────────────────────────
+        # Strategy: resolve src/dst from existing bindings (MATCH),
+        # then create the edge if it doesn't exist.
+        # If bindings don't have the vars, fall back to node lookup.
+
+        for em in edge_matches:
+            src_var = em.group(1)
+            src_label = em.group(2) or "Node"
+            src_props_str = em.group(3) or ""
+            edge_var = em.group(4) or None
+            rel_type = em.group(5) or "MERGE"
+            dst_var = em.group(6)
+            dst_label = em.group(7) or "Node"
+            dst_props_str = em.group(8) or ""
+
+            # Resolve src node
+            src_id = None
+            if src_var in bindings[0] and bindings[0][src_var]:
+                # Try to find node matching the binding
+                src_node = bindings[0][src_var]
+                for nid, attrs in graph._node_attrs.items():
+                    if src_node["properties"] == attrs:
+                        src_id = nid
+                        break
+            if src_id is None:
+                # Try to find by label + props from pattern
+                src_props = _parse_props(src_props_str)
+                match_props = {k: v for k, v in src_props.items() if k != "main_label"}
+                for nid, attrs in graph._node_attrs.items():
+                    if attrs.get("main_label") == src_label and (
+                        not match_props or all(
+                            attrs.get(k) == v for k, v in match_props.items()
+                        )
+                    ):
+                        src_id = nid
+                        break
+
+            # Resolve dst node
+            dst_id = None
+            if dst_var in bindings[0] and bindings[0][dst_var]:
+                dst_node = bindings[0][dst_var]
+                for nid, attrs in graph._node_attrs.items():
+                    if dst_node["properties"] == attrs:
+                        dst_id = nid
+                        break
+            if dst_id is None:
+                dst_props = _parse_props(dst_props_str)
+                match_props = {k: v for k, v in dst_props.items() if k != "main_label"}
+                for nid, attrs in graph._node_attrs.items():
+                    if attrs.get("main_label") == dst_label and (
+                        not match_props or all(
+                            attrs.get(k) == v for k, v in match_props.items()
+                        )
+                    ):
+                        dst_id = nid
+                        break
+
+            if src_id is not None and dst_id is not None:
+                # Check if edge already exists (directional only: ->)
+                has_edge = graph._graph.has_edge(src_id, dst_id, key=rel_type)
+
+                if not has_edge:
+                    graph._graph.add_edge(src_id, dst_id, key=rel_type, rel_type=rel_type)
+                    graph._edge_attrs[(src_id, dst_id, rel_type)] = {}
+
+                # Update bindings
+                if src_id is not None:
+                    var_node_map[src_var] = _resolve_node(graph, src_id)
+                if dst_id is not None:
+                    var_node_map[dst_var] = _resolve_node(graph, dst_id)
+
+            # If src or dst not found, skip (edge not created)
+            # This is the same behavior as Neo4j (MERGE with unmatched nodes fails silently)
+
+    else:
+        # ── Node MERGE: (n:Label {props}) ─────────────────────────
+        # Try to find existing node or create new one.
+
+        for var_name, spec in nodes_found.items():
+            label = spec["label"]
+            props = spec["props"]
+            match_props = {k: v for k, v in props.items() if k != "main_label"}
+
+            # Try to find an existing node matching label + props
+            found_id = None
+            for nid, attrs in graph._node_attrs.items():
+                node_label = attrs.get("main_label", "Node")
+                if node_label != label:
+                    continue
+                if match_props and not all(
+                    attrs.get(k) == v for k, v in match_props.items()
+                ):
+                    continue
+                found_id = nid
+                break
+
+            if found_id is not None:
+                # Node exists — use it
+                var_node_map[var_name] = _resolve_node(graph, found_id)
+            else:
+                # Node does not exist — create it
+                node_id = next_label
+                next_label += 1
+                node_data = dict(props)
+                node_data["main_label"] = label
+                graph._node_attrs[node_id] = node_data
+                graph._graph.add_node(node_id, main_label=label)
+                var_node_map[var_name] = _resolve_node(graph, node_id)
+
+    # Update bindings with merged nodes/edges
+    for binding in bindings:
+        for var_name, node_dict in var_node_map.items():
+            binding[var_name] = node_dict
+
+    return {
+        "bindings": bindings,
+        "graph": graph,
+        "next_label": next_label,
     }
 
 
@@ -2136,31 +2347,64 @@ def _exec_set(
 ) -> _Dict[str, _Any]:
     """Execute a SET clause."""
     graph = state["graph"]
-    assignments = _re.findall(r"(\w+)\.(\w+)\s*=\s*(.+?)(?:,|$)", body)
+    # Split into individual assignments.
+    # Cypher supports both comma-separated and space-separated:
+    #   SET n.`a` = "1", n.`b` = "2"
+    #   SET n.`a` = "1" n.`b` = "2"
+    raw_parts = _re.split(r",\s*", body.strip())
+    assignments: _List[_Tuple[str, str, str]] = []
+    for part in raw_parts:
+        part = part.strip()
+        if not part:
+            continue
+        # Split space-separated assignments
+        for m in _re.finditer(
+            r"(\w+)\.(?:`(\w+)`|(\w+))\s*=\s*(.+?)(?=\s+\w+\.(?:`|\w)|$)",
+            part,
+        ):
+            var = m.group(1)
+            prop = m.group(2) or m.group(3)
+            val_str = m.group(4).strip()
+            assignments.append((var, prop, val_str))
 
+    # Resolve each variable to a node ID once, then apply all assignments
+    var_to_id: _Dict[str, int] = {}
     for binding in state["bindings"]:
+        if not binding:
+            continue
         for var, prop, val_str in assignments:
-            val_str = val_str.strip()
-            if val_str.startswith('"') and val_str.endswith('"'):
-                val = val_str[1:-1]
-            elif val_str.startswith("'") and val_str.endswith("'"):
-                val = val_str[1:-1]
-            else:
-                try:
-                    val = int(val_str)
-                except ValueError:
-                    try:
-                        val = float(val_str)
-                    except ValueError:
-                        val = val_str
+            if var in var_to_id:
+                continue  # already resolved
+            if var not in binding:
+                continue
+            node = binding[var]
+            for nid, attrs in graph._node_attrs.items():
+                if node["properties"] == attrs:
+                    var_to_id[var] = nid
+                    break
+            if var in var_to_id:
+                break  # all vars resolved from this binding
 
-            if var in binding:
-                node = binding[var]
-                for nid, attrs in graph._node_attrs.items():
-                    if node["properties"] == attrs:
-                        graph._node_attrs[nid][prop] = val
-                        graph._graph.nodes[nid][prop] = val
-                        break
+    # Apply all assignments to resolved node IDs
+    for var, prop, val_str in assignments:
+        if var not in var_to_id:
+            continue
+        nid = var_to_id[var]
+        val_str = val_str.strip()
+        if val_str.startswith('"') and val_str.endswith('"'):
+            val = val_str[1:-1]
+        elif val_str.startswith("'") and val_str.endswith("'"):
+            val = val_str[1:-1]
+        else:
+            try:
+                val = int(val_str)
+            except ValueError:
+                try:
+                    val = float(val_str)
+                except ValueError:
+                    val = val_str
+        graph._node_attrs[nid][prop] = val
+        graph._graph.nodes[nid][prop] = val
 
     return state
 

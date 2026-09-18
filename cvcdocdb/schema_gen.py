@@ -53,7 +53,29 @@ from __future__ import annotations
 
 import datetime
 import os
+import re
 from typing import Any, Dict, List, Optional
+
+# Schema-derived names (class names, property names) become literal Python
+# identifiers in the generated source (`class {name}(Node):`,
+# `self.{name} = ...`). An untrusted schema (e.g. converted from a
+# third-party RDF/OWL ontology) must not be able to smuggle arbitrary
+# code through these positions.
+_IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+def _validate_identifier(name: str, kind: str) -> str:
+    """Ensure a schema-derived name is safe to splice as a Python identifier.
+
+    Raises:
+        ValueError: If `name` is not a valid Python identifier.
+    """
+    if not isinstance(name, str) or not _IDENTIFIER_RE.match(name):
+        raise ValueError(
+            f"Invalid {kind} {name!r}: schema-derived {kind}s must match "
+            f"{_IDENTIFIER_RE.pattern!r} to be used safely in generated code."
+        )
+    return name
 
 try:
     import yaml
@@ -194,32 +216,36 @@ def _generate_node_class(
     doc: str,
 ) -> str:
     """Generate a Node subclass."""
+    _validate_identifier(class_name, "class_name")
     lines: List[str] = []
     lines.append(f"class {class_name}(Node):")
-    lines.append(f'    """{doc}."""')
+    lines.append(f"    {doc + '.'!r}")
     lines.append("")
 
     # pk is optional when no primary_key defined
     pk_type = "Dict[str, Any]" if primary_key else "Optional[Dict[str, Any]]"
     pk_default = f" = None" if not primary_key else ""
     lines.append(f"    def __init__(self, pk: {pk_type}{pk_default}, **kwargs: Any) -> None:")
-    lines.append(f'        """Initialize a {class_name} node.')
-    lines.append("")
-    lines.append(f"        Args:")
     if primary_key:
-        lines.append(f"            pk: Primary key dict with fields: {', '.join(primary_key)}.")
+        pk_doc = f"pk: Primary key dict with fields: {', '.join(primary_key)}."
     else:
-        lines.append(f"            pk: Optional primary key dict. When not provided, the backend assigns an ID.")
-    lines.append(f"            **kwargs: Additional properties and attributes.")
-    lines.append(f"        \"\"\"")
+        pk_doc = "pk: Optional primary key dict. When not provided, the backend assigns an ID."
+    init_doc = (
+        f"Initialize a {class_name} node.\n\n"
+        f"        Args:\n"
+        f"            {pk_doc}\n"
+        f"            **kwargs: Additional properties and attributes."
+    )
+    lines.append(f"        {init_doc!r}")
 
     # Call super().__init__
-    init_kwargs = [f"pk=pk", f'main_label="{label}"']
+    init_kwargs = [f"pk=pk", f"main_label={label!r}"]
     lines.append("        super().__init__(" + ", ".join(init_kwargs) + ", **kwargs)")
 
     # Set properties
     for prop_name in sorted(props):
-        lines.append(f"        self.{prop_name} = kwargs.get(\"{prop_name}\", {props[prop_name]!r})")
+        _validate_identifier(prop_name, "property name")
+        lines.append(f"        self.{prop_name} = kwargs.get({prop_name!r}, {props[prop_name]!r})")
 
     return "\n".join(lines)
 
@@ -234,27 +260,30 @@ def _generate_weaknode_class(
     doc: str,
 ) -> str:
     """Generate a WeakNode subclass."""
+    _validate_identifier(class_name, "class_name")
     lines: List[str] = []
     lines.append(f"class {class_name}(WeakNode):")
-    lines.append(f'    """{doc}."""')
+    lines.append(f"    {doc + '.'!r}")
     lines.append("")
     lines.append(f"    def __init__(self, parent: Node, **kwargs: Any) -> None:")
-    lines.append(f'        """Initialize a {class_name} weak node.')
-    lines.append("")
-    lines.append(f"        Args:")
-    lines.append(f"            parent: The parent {parent_label or 'Node'} instance.")
-    lines.append(f"            **kwargs: Additional properties and attributes.")
-    lines.append(f"        \"\"\"")
+    init_doc = (
+        f"Initialize a {class_name} weak node.\n\n"
+        f"        Args:\n"
+        f"            parent: The parent {parent_label or 'Node'} instance.\n"
+        f"            **kwargs: Additional properties and attributes."
+    )
+    lines.append(f"        {init_doc!r}")
 
     # Call super().__init__
-    init_kwargs = [f"parent=parent", f'main_label="{label}"']
+    init_kwargs = [f"parent=parent", f"main_label={label!r}"]
     if parent_relation:
-        init_kwargs.append(f'parent_relation="{parent_relation}"')
+        init_kwargs.append(f"parent_relation={parent_relation!r}")
     lines.append("        super().__init__(" + ", ".join(init_kwargs) + ", **kwargs)")
 
     # Set properties
     for prop_name in sorted(props):
-        lines.append(f"        self.{prop_name} = kwargs.get(\"{prop_name}\", {props[prop_name]!r})")
+        _validate_identifier(prop_name, "property name")
+        lines.append(f"        self.{prop_name} = kwargs.get({prop_name!r}, {props[prop_name]!r})")
 
     return "\n".join(lines)
 
@@ -265,25 +294,28 @@ def _generate_relation_class(
     props: Dict[str, str],
 ) -> str:
     """Generate a Relation subclass."""
+    _validate_identifier(class_name, "class_name")
     lines: List[str] = []
     lines.append(f"class {class_name}(Relation):")
-    lines.append(f'    """Auto-generated relation class."""')
+    lines.append(f"    'Auto-generated relation class.'")
     lines.append("")
     lines.append(f"    def __init__(self, src: Node, dst: Node, **kwargs: Any) -> None:")
-    lines.append(f'        """Initialize a {class_name} relation.')
-    lines.append("")
-    lines.append(f"        Args:")
-    lines.append(f"            src: Source node.")
-    lines.append(f"            dst: Destination node.")
-    lines.append(f"            **kwargs: Edge properties.")
-    lines.append(f"        \"\"\"")
+    init_doc = (
+        f"Initialize a {class_name} relation.\n\n"
+        f"        Args:\n"
+        f"            src: Source node.\n"
+        f"            dst: Destination node.\n"
+        f"            **kwargs: Edge properties."
+    )
+    lines.append(f"        {init_doc!r}")
 
-    init_kwargs = [f"src=src", f"dst=dst", f'rel_type="{rel_type}"']
+    init_kwargs = [f"src=src", f"dst=dst", f"rel_type={rel_type!r}"]
     lines.append("        super().__init__(" + ", ".join(init_kwargs) + ", **kwargs)")
 
     # Set properties
     for prop_name in sorted(props):
-        lines.append(f"        self.{prop_name} = kwargs.get(\"{prop_name}\", {props[prop_name]!r})")
+        _validate_identifier(prop_name, "property name")
+        lines.append(f"        self.{prop_name} = kwargs.get({prop_name!r}, {props[prop_name]!r})")
 
     return "\n".join(lines)
 
@@ -301,24 +333,24 @@ def _generate_weakrelation_class(
         propagate: Whether the relation carries the ``_propagate=TRUE``
             flag for cascade delete (default ``True``).
     """
+    _validate_identifier(class_name, "class_name")
     lines: List[str] = []
     lines.append(f"class {class_name}(WeakRelation):")
-    lines.append(f'    """Auto-generated weak relation class.')
-    lines.append(f'')
-    lines.append(f'    Propagate: {propagate}.')
-    lines.append(f'    """')
+    class_doc = f"Auto-generated weak relation class.\n\n    Propagate: {propagate}."
+    lines.append(f"    {class_doc!r}")
     lines.append("")
     lines.append(f"    def __init__(self, src: Node, dst: Node, **kwargs: Any) -> None:")
-    lines.append(f'        """Initialize a {class_name} weak relation.')
-    lines.append("")
-    lines.append(f"        Args:")
-    lines.append(f"            src: Source (parent) node.")
-    lines.append(f"            dst: Destination (child) node.")
-    lines.append(f"            propagate: Override the default propagation flag.")
-    lines.append(f"            **kwargs: Edge properties.")
-    lines.append(f"        \"\"\"")
+    init_doc = (
+        f"Initialize a {class_name} weak relation.\n\n"
+        f"        Args:\n"
+        f"            src: Source (parent) node.\n"
+        f"            dst: Destination (child) node.\n"
+        f"            propagate: Override the default propagation flag.\n"
+        f"            **kwargs: Edge properties."
+    )
+    lines.append(f"        {init_doc!r}")
 
-    init_kwargs = [f"src=src", f"dst=dst", f'rel_type="{rel_type}"']
+    init_kwargs = [f"src=src", f"dst=dst", f"rel_type={rel_type!r}"]
     if propagate:
         init_kwargs.append(f"propagate={propagate}")
     lines.append("        super().__init__(" + ", ".join(init_kwargs) + ", **kwargs)")

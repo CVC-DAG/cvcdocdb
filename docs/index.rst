@@ -1,4 +1,4 @@
-DRM Tools Documentation
+cvcdocdb Documentation
 =======================
 
 Document Representation Model (DRM) is a Python library for graph-based

@@ -7,16 +7,16 @@ Each dataset notebook shows how to load the same data into both
 ``NetworkXGraph`` and ``Neo4jGraph``. From every notebook page you can also
 open the notebook in Google Colab, Kaggle, or a local Jupyter server.
 
-Introduction
-------------
+Getting Started
+---------------
 
 Start here for a minimal end-to-end graph workflow:
 
 .. toctree::
    :maxdepth: 1
 
-   notebooks/intro/intro_basics
-   notebooks/intro/querying_and_filtering
+   notebooks/getting_started/intro_basics
+   notebooks/getting_started/querying_and_filtering
 
 Interactive Demos
 -----------------
@@ -26,10 +26,12 @@ Hands-on explorations with interactive widgets and advanced features:
 .. toctree::
    :maxdepth: 1
 
-   notebooks/interactive/weaknodes_interactive
-   notebooks/interactive/vector_search
-   notebooks/interactive/delete_strategies
-   notebooks/interactive/propagation_demo
+   notebooks/interactive/weaknodes
+   notebooks/demos/vector_search
+   notebooks/demos/delete_strategies
+   notebooks/demos/propagation_demo
+   notebooks/demos/ric_o_demo
+   notebooks/demos/ric_o_networkx_demo
 
 Dataset Examples
 ----------------
@@ -98,7 +100,7 @@ Notes
 -----
 
 - Notebook pages keep the original ``.ipynb`` download link in the rendered output.
-- Tutorials are configured to use the ``cvcdocdb-tool`` Jupyter kernel by default.
+- Tutorials are configured to use the ``cvcdocdb`` Jupyter kernel by default.
 - Each tutorial notebook starts with an installation cell that upgrades DRM
   from GitHub and falls back to a local editable install when needed.
 - Button links can be customized with env vars: ``DRM_DOCS_GITHUB_REPO``,

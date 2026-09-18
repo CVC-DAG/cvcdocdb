@@ -1,0 +1,48 @@
+# Schema generated from: got
+# Generated at: 2026-07-12
+
+labels:
+  Character:
+    class_name: Character
+    base_class: Node
+    properties:
+      character_id: integer
+      name: string
+      source: string
+      title: string
+    primary_key: ['name', 'character_id']
+    count: 25
+  House:
+    class_name: House
+    base_class: Node
+    properties:
+      house_name: string
+      name: string
+    primary_key: ['house_name', 'name']
+    count: 15
+  Place:
+    class_name: Place
+    base_class: Node
+    properties:
+      {}
+    primary_key: []
+    count: 0
+  TestNode:
+    class_name: TestNode
+    base_class: Node
+    properties:
+      {}
+    primary_key: []
+    count: 0
+
+relationships:
+  MEMBER_OF:
+    class_name: MemberOf
+    src: Node
+    dst: Node
+    properties:
+      {}
+    count: 25
+
+weak_relations:
+  {}
