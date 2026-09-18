@@ -2,14 +2,14 @@ from setuptools import setup, find_packages
 import os
 
 NAME = "cvcdocdb"
-VERSION = "1.0.0"
+VERSION = "1.1.0a3"
 DESCR = "Graph-based document representation library with Neo4j and NetworkX backends"
 URL = "https://github.com/CVC-DAG/cvcdocdb"
 AUTHOR = "Oriol Ramos Terrades"
 EMAIL = "oriolrt@cvc.uab.cat"
 LICENSE = "MIT"
 
-PACKAGES = find_packages(exclude="cvcdocdb/")
+PACKAGES = find_packages(exclude=["test", "test.*"])
 
 
 def get_long_description():

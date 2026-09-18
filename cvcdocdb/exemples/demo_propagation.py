@@ -457,7 +457,7 @@ def main() -> int:
     """Run the full demo workflow."""
     print(textwrap.dedent("""
     ╔══════════════════════════════════════════════════════════╗
-    ║  DRM Tools — Neo4j Propagation Demo                      ║
+    ║  cvcdocdb — Neo4j Propagation Demo                      ║
     ║  Full workflow: connect → load → generate → init → query ║
     ╚══════════════════════════════════════════════════════════╝
     """))

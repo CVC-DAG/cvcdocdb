@@ -9,8 +9,35 @@ from neo4j.exceptions import ConstraintError, TransactionError
 from . import Node, Relation, WeakRelation
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 from tqdm import tqdm
+import re
 import threading
 import warnings
+
+# Cypher does not support parameterizing labels or relationship types, so
+# they are interpolated directly into query strings. Restrict them (and any
+# property key used to build a WHERE/MERGE clause) to safe identifiers to
+# prevent Cypher injection via a crafted main_label / relation type / pk key.
+_CYPHER_IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+def _validate_cypher_identifier(name: Any, kind: str) -> str:
+    """Ensure a value used as a Cypher label/relation-type/property key is safe.
+
+    Raises:
+        ValueError: If `name` is not a valid, safe identifier.
+    """
+    if not isinstance(name, str) or not _CYPHER_IDENTIFIER_RE.match(name):
+        raise ValueError(
+            f"Invalid {kind} {name!r}: must match {_CYPHER_IDENTIFIER_RE.pattern!r} "
+            "to be used safely in a Cypher query."
+        )
+    return name
+
+
+def _escape_cypher_string(value: str) -> str:
+    """Escape a string value for safe interpolation inside a double-quoted
+    Cypher string literal (backslashes and double quotes)."""
+    return value.replace("\\", "\\\\").replace('"', '\\"')
 
 
 class Neo4jGraph:
@@ -119,6 +146,9 @@ class Neo4jGraph:
             The Neo4j internal node id of the inserted node.
         """
 
+        if node.main_label:
+            _validate_cypher_identifier(node.main_label, "main_label")
+
         has_parent = insert_parent if node["is_weak"] else False
         has_dependencies = True if node["dependencies"] else False
 
@@ -222,6 +252,9 @@ class Neo4jGraph:
             True if the node was deleted, False if deletion was refused
             (e.g. RESTRICT with existing edges) or the node was not found.
         """
+        if node.main_label:
+            _validate_cypher_identifier(node.main_label, "main_label")
+
         node.version = self._version
 
         inici = False
@@ -343,6 +376,8 @@ class Neo4jGraph:
             # If neo4j_id is already known, return it directly
             if node.neo4j_id is not None:
                 return node.neo4j_id
+            if node.main_label:
+                _validate_cypher_identifier(node.main_label, "main_label")
             if self._tx is None:
                 self._tx = self._session.begin_transaction()
                 inici = True
@@ -400,6 +435,14 @@ class Neo4jGraph:
             RuntimeError: If the source or destination node does not exist
                 in the database (FK violation).
         """
+        _validate_cypher_identifier(rel["type"], "relation type")
+        src_label = rel["src"].get("main_label")
+        dst_label = rel["dst"].get("main_label")
+        if src_label:
+            _validate_cypher_identifier(src_label, "main_label")
+        if dst_label:
+            _validate_cypher_identifier(dst_label, "main_label")
+
         inici = False
 
         if self._tx is None:
@@ -527,6 +570,7 @@ class Neo4jGraph:
 
     def get_edge_attrs(self, u: int, v: int, key: str) -> Optional[Dict[str, Any]]:
         """Return attributes stored for an edge."""
+        _validate_cypher_identifier(key, "relation type")
         result = self._session.run(
             "MATCH (a)-[r:" + key + "]->(b) "
             "WHERE id(a) = $src AND id(b) = $dst "
@@ -629,6 +673,19 @@ class Neo4jGraph:
         Raises:
             RuntimeError: If any part of the group creation fails.
         """
+        for lbl in strong_node.labels:
+            _validate_cypher_identifier(lbl, "label")
+        for wn in weak_nodes or []:
+            for lbl in wn.labels:
+                _validate_cypher_identifier(lbl, "label")
+            parent_relation = wn["parent_relation"] if "parent_relation" in wn else "HAS_CHILD"
+            _validate_cypher_identifier(parent_relation, "relation type")
+        for wr in weak_relations or []:
+            _validate_cypher_identifier(wr["type"], "relation type")
+            for lbl in (wr["src"].get("main_label"), wr["dst"].get("main_label")):
+                if lbl:
+                    _validate_cypher_identifier(lbl, "main_label")
+
         session = self._session
 
         def _create_group_tx(tx: Any) -> int:
@@ -1109,6 +1166,7 @@ class Neo4jGraph:
         label = node_data.get("main_label")
         if pk is None or label is None:
             return None
+        _validate_cypher_identifier(label, "main_label")
         result = tx.run(
             "MATCH (n:"
             + label
@@ -1686,8 +1744,9 @@ def _generate_where_cond(node_name, pk, type="where"):
     valor = [pk[a] for a in pk.keys() if a == 'neo4j_id']
     valor = valor[0] if len(valor) > 0 else None
 
+    id_key = 'id(' + node_name + ')'
     if valor is not None and len(pk) == 1:
-        pk = { 'id('+node_name+')' : valor}
+        pk = { id_key : valor}
 
     if type.lower() == "where":
         conj, equal = " AND ", "="
@@ -1696,13 +1755,22 @@ def _generate_where_cond(node_name, pk, type="where"):
         conj, equal = " , ", " : "
         node_name = ""
 
+    def _safe_value(v):
+        if isinstance(v, bool):
+            return "true" if v else "false"
+        if isinstance(v, int):
+            return str(v)
+        return '"' + _escape_cypher_string(str(v)) + '"'
+
     return (
         " "
         + conj.join(
             [
                 node_name
                 + "{}{}{}".format(
-                    k, equal, pk[k] if isinstance(pk[k], int) else '"' + pk[k] + '"'
+                    k if k == id_key else _validate_cypher_identifier(k, "property key"),
+                    equal,
+                    _safe_value(pk[k]),
                 )
                 for k in pk
             ]

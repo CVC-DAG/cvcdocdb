@@ -1,4 +1,4 @@
-"""Pytest configuration for cvcdocdb tools.
+"""Pytest configuration for cvcdocdb.
 
 Organizes tests into three levels:
 
@@ -24,7 +24,28 @@ Usage::
     pytest test/ -v -m slow
 """
 
+import os
+import socket
+from urllib.parse import urlparse
+
 import pytest
+
+
+def _neo4j_reachable(timeout: float = 0.5) -> bool:
+    """Quick TCP probe so unreachable-Neo4j runs skip fast instead of timing out.
+
+    Without this, every `slow`-marked test independently tries (and fails)
+    to connect, which is what made a plain `pytest test/` run ~4x slower
+    than `pytest test/ -m "not slow"` locally.
+    """
+    url = os.environ.get("NEO4J_DEV_URL") or os.environ.get("NEO4J_URL") or "bolt://localhost:7687"
+    parsed = urlparse(url)
+    host, port = parsed.hostname or "localhost", parsed.port or 7687
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except OSError:
+        return False
 
 
 def pytest_configure(config):
@@ -66,6 +87,12 @@ def pytest_collection_modifyitems(config, items):
         "test_neo4j_real.py",
     }
 
+    neo4j_ok = _neo4j_reachable()
+    skip_unreachable = pytest.mark.skip(
+        reason="Neo4j unreachable (no server at NEO4J_DEV_URL/NEO4J_URL) — "
+        "skipping 'slow' test instead of timing out on connection"
+    )
+
     for item in items:
         filename = item.fspath.basename
         if filename in unit_files:
@@ -75,3 +102,6 @@ def pytest_collection_modifyitems(config, items):
         elif filename in neo4j_files:
             item.add_marker(pytest.mark.slow)
         # test_graph_store_contract.py has individual markers on each method
+
+        if not neo4j_ok and "slow" in {m.name for m in item.iter_markers()}:
+            item.add_marker(skip_unreachable)
