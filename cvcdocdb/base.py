@@ -54,6 +54,7 @@ def _mergePK(
     """
     if pk_b is None:
         return pk_a
+    pk_b = dict(pk_b)
     k = set(pk_a.keys()).intersection(set(pk_b.keys()))
 
     for v in k:
@@ -248,13 +249,15 @@ class Node:
 
         if "_" + key in attr:
             return attr["_" + key]
+        elif key in attr:
+            return attr[key]
         else:
             raise Exception(key + " is not a node attribute")
 
     def __setitem__(self, key, value):
         if key == "pk":
             aux = _setNodePK(value)
-            self._main_label, self._pk = aux["_main_label"], aux["pk"]
+            self._main_label, self._primary_key = aux["main_label"], aux["pk"]
             return
 
         if key == "main_label":

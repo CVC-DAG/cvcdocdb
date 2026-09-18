@@ -1368,11 +1368,24 @@ class NetworkXGraph(GraphStore):
     # ------------------------------------------------------------------
 
     def _default_persistence_path(self) -> str:
-        """Build a deterministic persistence path for the current workspace."""
+        """Build a deterministic persistence path for the current workspace.
+
+        Uses a per-user, permission-restricted cache directory rather than
+        the shared system temp dir: a predictable filename inside a
+        world-writable temp dir would let another local user pre-plant a
+        malicious pickle file for us to unpickle (see _load_state).
+        """
         workspace = os.path.abspath(os.getcwd())
         workspace_hash = hashlib.sha1(workspace.encode("utf-8")).hexdigest()[:12]
-        filename = f"drm_networkx_graph_{workspace_hash}.pkl"
-        return os.path.join(tempfile.gettempdir(), filename)
+        filename = f"cvcdocdb_networkx_graph_{workspace_hash}.pkl"
+        cache_dir = os.path.join(os.path.expanduser("~"), ".cache", "cvcdocdb")
+        os.makedirs(cache_dir, mode=0o700, exist_ok=True)
+        if hasattr(os, "chmod"):
+            try:
+                os.chmod(cache_dir, 0o700)
+            except OSError:
+                pass
+        return os.path.join(cache_dir, filename)
 
     def _save_state(self) -> None:
         """Persist the full graph store state atomically."""
@@ -1406,9 +1419,23 @@ class NetworkXGraph(GraphStore):
             os.rename(tmp_path, self._persistence_path)
 
     def _load_state(self) -> None:
-        """Load graph store state from disk if present."""
+        """Load graph store state from disk if present.
+
+        Refuses to unpickle a file that isn't owned by the current user —
+        defense in depth against a malicious pickle pre-planted at a
+        predictable path by another local user (see also
+        _default_persistence_path, which avoids the shared temp dir).
+        """
         if not os.path.exists(self._persistence_path):
             return
+        if hasattr(os, "getuid"):
+            file_uid = os.stat(self._persistence_path).st_uid
+            if file_uid != os.getuid():
+                raise RuntimeError(
+                    f"Refusing to load {self._persistence_path!r}: "
+                    f"it is not owned by the current user (uid {os.getuid()}, "
+                    f"file owned by uid {file_uid})."
+                )
         with open(self._persistence_path, "rb") as fh:
             state = pickle.load(fh)
         self._graph = state.get("graph", nx.MultiDiGraph())

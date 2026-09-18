@@ -2,6 +2,9 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 
 import glob
 import os
+import pickle
+import shutil
+import stat
 import sys
 import tempfile
 import unittest
@@ -85,6 +88,53 @@ class NetworkXGraphTest(unittest.TestCase):
         self.assertEqual(len(reloaded.get_edges()), 1)
         self.assertIsNotNone(reloaded.checkNode(Node(pk={"id": 1}, main_label="SrcNode")))
         reloaded.close()
+
+    def test_default_persistence_path_is_not_in_shared_temp_dir(self) -> None:
+        """The default (no persistence_path given) location must not be a
+        predictable path inside the shared, world-writable system temp dir
+        — otherwise another local user could pre-plant a malicious pickle
+        file there for us to unpickle."""
+        graph = NetworkXGraph()
+        try:
+            path = graph._persistence_path
+            self.assertNotEqual(
+                os.path.dirname(os.path.abspath(path)),
+                os.path.abspath(tempfile.gettempdir()),
+            )
+        finally:
+            graph.close()
+
+    def test_default_persistence_dir_is_user_restricted(self) -> None:
+        """The default persistence directory must not be group/world
+        readable or writable on POSIX systems."""
+        if not hasattr(os, "getuid"):
+            self.skipTest("POSIX permission bits not applicable on this platform")
+        graph = NetworkXGraph()
+        try:
+            parent_dir = os.path.dirname(os.path.abspath(graph._persistence_path))
+            mode = stat.S_IMODE(os.stat(parent_dir).st_mode)
+            self.assertEqual(mode & (stat.S_IRWXG | stat.S_IRWXO), 0)
+        finally:
+            graph.close()
+
+    def test_load_state_refuses_file_not_owned_by_current_user(self) -> None:
+        """_load_state must refuse to unpickle a persistence file that
+        isn't owned by the current user, to defeat a pre-planted malicious
+        pickle on a shared multi-user host."""
+        if not hasattr(os, "getuid"):
+            self.skipTest("POSIX ownership checks not applicable on this platform")
+        tmp = tempfile.mkdtemp()
+        try:
+            path = os.path.join(tmp, "planted.pkl")
+            with open(path, "wb") as fh:
+                pickle.dump({"graph": None}, fh)
+            graph = NetworkXGraph.__new__(NetworkXGraph)
+            graph._persistence_path = path
+            with mock_patch("os.getuid", return_value=os.getuid() + 12345):
+                with self.assertRaises(RuntimeError):
+                    graph._load_state()
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
 
     # -- Node CRUD --
 
@@ -1090,6 +1140,22 @@ class NetworkXGraphTest(unittest.TestCase):
         self.assertEqual(len(graph.get_nodes()), 8)
         graph.close()
 
+    def test_nx_graph_node_pk_none_assigned_after_insert(self) -> None:
+        """Node amb pk=None explícit: el backend assigna un ID com a PK.
+
+        (Node/Relation dunder-method unit tests live in test_node.py /
+        test_relation.py; this one stays here because it exercises
+        NetworkXGraph's ID assignment, not just the Node class.)
+        """
+        node = Node(pk=None, main_label="AutoIdNode")
+        self.assertIsNone(node._primary_key)
+        graph = self._make_graph()
+        graph.insertNode(node, replace=True)
+        self.assertIsNotNone(node._primary_key)
+        self.assertIn("id", node._primary_key)
+        self.assertEqual(node._primary_key["id"], node.neo4j_id)
+        graph.close()
+
 
 # ---------------------------------------------------------------------------
 # Tests for Neo4jGraph — wraps Neo4j driver (mocked in tests)
@@ -1405,6 +1471,45 @@ class Neo4jGraphTest(unittest.TestCase):
             graph.query_vector_index("embedding", [1.0, 0.0, 0.0], top_k=1)
         graph.close()
 
+    def test_insert_node_rejects_malicious_main_label(self) -> None:
+        """A main_label crafted to break out of a Cypher label position must
+        be rejected before any query is built (Cypher injection guard)."""
+        graph = self._make_graph()
+        node = Node(pk={"id": 1}, main_label='Evil) DETACH DELETE n //')
+        with self.assertRaises(ValueError):
+            graph.insertNode(node, replace=True)
+        graph.close()
+
+    def test_insert_relation_rejects_malicious_rel_type(self) -> None:
+        """A relation type crafted to break out of a Cypher relation-type
+        position must be rejected before any query is built."""
+        graph = self._make_graph()
+        src = Node(pk={"id": 1}, main_label="A")
+        dst = Node(pk={"id": 2}, main_label="B")
+        rel = Relation(src, dst, "KNOWS]->(x) DETACH DELETE x //")
+        with self.assertRaises(ValueError):
+            graph.insertRelation(rel)
+        graph.close()
+
+    def test_generate_where_cond_escapes_quotes_in_pk_values(self) -> None:
+        """A pk value containing a double quote must not be able to close
+        the Cypher string literal early."""
+        from cvcdocdb.neo4j_graph import _generate_where_cond
+
+        cond = _generate_where_cond("a", {"name": 'x" OR TRUE OR "'})
+        # The injected quote must be escaped, so the payload stays inside
+        # a single string literal rather than becoming Cypher syntax.
+        self.assertIn('\\"', cond)
+        self.assertNotIn('x" OR TRUE OR "', cond)
+
+    def test_generate_where_cond_rejects_malicious_property_key(self) -> None:
+        """A pk dict key is spliced as a bare Cypher property name and must
+        be validated as a safe identifier."""
+        from cvcdocdb.neo4j_graph import _generate_where_cond
+
+        with self.assertRaises(ValueError):
+            _generate_where_cond("a", {"id}) DETACH DELETE a //": 1})
+
     def test_relation_creation(self) -> None:
         """Test per validar la creacio de relacions entre nodes."""
         graph = self._make_graph()
@@ -1482,279 +1587,6 @@ class Neo4jGraphTest(unittest.TestCase):
         self.assertIn("FK violation", str(ctx.exception))
         self.assertIn("src", str(ctx.exception))
         graph.close()
-
-    def test_relation_src_dst_access(self) -> None:
-        """Test que rel["src"] i rel["dst"] retornen el format esperat."""
-        src = Node(pk={"id": 1}, main_label="TestNode")
-        dst = Node(pk={"id": 2}, main_label="TestNode")
-        rel = Relation(src, dst, "FOLLOWS")
-
-        src_data = rel["src"]
-        dst_data = rel["dst"]
-
-        self.assertIsInstance(src_data, dict)
-        self.assertIn("main_label", src_data)
-        self.assertIn("pk", src_data)
-        self.assertIsInstance(dst_data, dict)
-        self.assertIn("main_label", dst_data)
-        self.assertIn("pk", dst_data)
-
-    def test_relation_type_uppercase(self) -> None:
-        """Test que el tipus de relacio es converteix a uppercase."""
-        src = Node(pk={"id": 1}, main_label="TestNode")
-        dst = Node(pk={"id": 2}, main_label="TestNode")
-        rel = Relation(src, dst, "lowercase")
-
-        self.assertEqual(rel["type"], "LOWERCASE")
-
-    def test_node_repr(self) -> None:
-        """Test que el repr d'un node sigui legible."""
-        node = Node(pk={"nom": "Test"}, main_label="TestNode")
-        repr_str = repr(node)
-        self.assertIn("TestNode", repr_str)
-        self.assertIn("Test", repr_str)
-
-    def test_node_labels(self) -> None:
-        """Test que les etiquetes d'un node siguin correctes."""
-        node = Node(pk={"id": 1}, main_label="MyLabel", alternative_labels=["Alt1", "Alt2"])
-        labels = node.labels
-        self.assertEqual(labels, ["MyLabel", "Alt1", "Alt2"])
-
-    def test_node_main_label(self) -> None:
-        """Test l'acces a main_label."""
-        node = Node(pk={"id": 1}, main_label="MyLabel")
-        self.assertEqual(node.main_label, "MyLabel")
-
-    def test_node_attributes(self) -> None:
-        """Test que attributes retorni (pk, attrs)."""
-        node = Node(pk={"id": 1}, main_label="TestNode", name="test", value=42)
-        pk, attrs = node.attributes
-        self.assertIsInstance(pk, dict)
-        self.assertIn("id", pk)
-        self.assertIn("name", attrs)
-        self.assertIn("value", attrs)
-        self.assertEqual(attrs["name"], "test")
-        self.assertEqual(attrs["value"], 42)
-
-
-# ---------------------------------------------------------------------------
-# Tests for base.py classes
-# ---------------------------------------------------------------------------
-
-class BaseTest(unittest.TestCase):
-    """Tests for base.py classes: Node, Relation, WeakNode, WeakRelation."""
-
-    def test_node_pk_int(self) -> None:
-        """Test que un Node amb pk int tingui _primary_key correcte."""
-        node = Node(pk=42, main_label="TestNode")
-        self.assertEqual(node._primary_key, {"id": 42})
-
-    def test_node_pk_dict(self) -> None:
-        """Test que un Node amb pk dict tingui _primary_key correcte."""
-        node = Node(pk={"nom": "Test", "any": 2024}, main_label="TestNode")
-        self.assertIsInstance(node._primary_key, dict)
-        self.assertIn("nom", node._primary_key)
-        self.assertIn("any", node._primary_key)
-
-    def test_node_explicit_pk_none_without_neo4j_id(self) -> None:
-        """Node amb pk=None explícit: _primary_key = None (backend assignarà ID)."""
-        node = Node(pk=None, main_label="TestNode")
-        self.assertIsNone(node._primary_key)
-        self.assertEqual(node._main_label, "TestNode")
-
-    def test_node_explicit_pk_none_repr(self) -> None:
-        """Test que el repr d'un node amb pk=None no crasheja."""
-        node = Node(pk=None, main_label="TempNode")
-        r = repr(node)
-        self.assertIn("pk:None", r)
-
-    def test_explicit_pk_none_cannot_be_parent(self) -> None:
-        """Test que un node amb pk=None no pot ser parent de WeakNode."""
-        node = Node(pk=None, main_label="TempNode")
-        with self.assertRaises(ValueError) as ctx:
-            WeakNode(parent=node, pk={"sub": 1}, main_label="Child")
-        self.assertIn("parent must have a primary key", str(ctx.exception))
-
-    def test_explicit_pk_none_assigned_after_insert(self) -> None:
-        """Node amb pk=None explícit: el backend assigna un ID com a PK."""
-        node = Node(pk=None, main_label="AutoIdNode")
-        self.assertIsNone(node._primary_key)
-        from cvcdocdb.networkx_graph import NetworkXGraph
-        graph = NetworkXGraph()
-        graph.insertNode(node, replace=True)
-        self.assertIsNotNone(node._primary_key)
-        self.assertIn("id", node._primary_key)
-        self.assertEqual(node._primary_key["id"], node.neo4j_id)
-        graph.close()
-
-    def test_node_pk_none_with_neo4j_id(self) -> None:
-        """Test que un Node sense pk pero amb neo4j_id tingui _primary_key."""
-        node = Node(pk=None, main_label="TestNode", neo4j_id=123)
-        self.assertEqual(node._primary_key, {"id": 123})
-        self.assertEqual(node._neo4j_id, 123)
-
-    def test_node_getitem_pk(self) -> None:
-        """Test que node['pk'] retorni el format esperat."""
-        node = Node(pk={"id": 1}, main_label="TestNode")
-        pk_data = node["pk"]
-        self.assertIsInstance(pk_data, dict)
-        self.assertIn("main_label", pk_data)
-        self.assertIn("pk", pk_data)
-
-    def test_node_getitem_main_label(self) -> None:
-        """Test que node['main_label'] retorni el main_label."""
-        node = Node(pk={"id": 1}, main_label="TestNode")
-        self.assertEqual(node["main_label"], "TestNode")
-
-    def test_node_setitem_pk(self) -> None:
-        """Test que node['pk'] = ... actualitzi correctament.
-
-        Note: _setNodePK retorna {"main_label": ..., "pk": ...} pero
-        Node.__setitem__ espera "_main_label". Aixo es un bug conegut.
-        Aquest test verifica el comportament actual (KeyError).
-        """
-        node = Node(pk={"id": 1}, main_label="TestNode")
-        with self.assertRaises(KeyError):
-            node["pk"] = {"main_label": "TestNode", "pk": {"id": 2}}
-
-    def test_node_version_setter(self) -> None:
-        """Test que el setter de version actualitzi _primary_key per a v3."""
-        node = Node(pk={"a": 1, "b": 2}, main_label="TestNode", version=5)
-        node.version = 3
-        # Per a v3 amb múltiples claus, es fusionen en una sola
-        self.assertEqual(node._version, 3)
-
-    def test_relation_init(self) -> None:
-        """Test que Relation inicialitzi correctament."""
-        src = Node(pk={"id": 1}, main_label="SrcNode")
-        dst = Node(pk={"id": 2}, main_label="DstNode")
-        rel = Relation(src, dst, "CONNECTS")
-
-        self.assertEqual(rel._type, "CONNECTS")
-        self.assertIsInstance(rel._src, dict)
-        self.assertIsInstance(rel._dst, dict)
-
-    def test_relation_setitem(self) -> None:
-        """Test que rel['src'] = ... actualitzi correctament."""
-        src = Node(pk={"id": 1}, main_label="SrcNode")
-        dst = Node(pk={"id": 2}, main_label="DstNode")
-        rel = Relation(src, dst, "CONNECTS")
-
-        new_src = Node(pk={"id": 3}, main_label="NewSrcNode")
-        rel["src"] = new_src["pk"]
-        self.assertEqual(rel._src["main_label"], "NewSrcNode")
-
-    def test_weak_node(self) -> None:
-        """Test que WeakNode tingui is_weak=True i parent correcte."""
-        parent = Node(pk={"id": 1}, main_label="ParentNode")
-        # WeakNode requires a pk to merge with parent
-        child = WeakNode(parent=parent, pk={"sub_id": 1})
-        self.assertTrue(child._is_weak)
-        self.assertEqual(child._parent, parent)
-
-    def test_node_neo4j_id_setter(self) -> None:
-        """Test que el setter de neo4j_id funcioni."""
-        node = Node(pk={"id": 1}, main_label="TestNode")
-        node.neo4j_id = 99
-        self.assertEqual(node._neo4j_id, 99)
-
-    def test_node_is_weak_default(self) -> None:
-        """Test que is_weak sigui False per defecte."""
-        node = Node(pk={"id": 1}, main_label="TestNode")
-        self.assertFalse(node._is_weak)
-
-    def test_node_propagate_default(self) -> None:
-        """Test que _propagate sigui False per defecte."""
-        node = Node(pk={"id": 1}, main_label="TestNode")
-        self.assertFalse(node._propagate)
-
-    def test_node_dependencies(self) -> None:
-        """Test que dependencies es gestionin correctament."""
-        deps = {"has_name": Atribut("test")}
-        node = Node(pk={"id": 1}, main_label="TestNode", dependencies=deps)
-        self.assertEqual(node._dependencies, deps)
-
-    def test_node_no_dependencies(self) -> None:
-        """Test que sense dependencies, _dependencies sigui None."""
-        node = Node(pk={"id": 1}, main_label="TestNode")
-        self.assertIsNone(node._dependencies)
-
-    def test_node_kwargs_as_attributes(self) -> None:
-        """Test que kwargs es converteixin en atributs del node."""
-        node = Node(pk={"id": 1}, main_label="TestNode", custom_attr="hello", count=42)
-        self.assertEqual(node.custom_attr, "hello")
-        self.assertEqual(node.count, 42)
-
-    def test_node_labels_with_no_alternative(self) -> None:
-        """Test que sense alternative_labels, labels només contingui main_label."""
-        node = Node(pk={"id": 1}, main_label="SingleLabel")
-        self.assertEqual(node.labels, ["SingleLabel"])
-
-    def test_node_labels_with_string_alternative(self) -> None:
-        """Test que alternative_labels com a string es converteixi en llista."""
-        node = Node(pk={"id": 1}, main_label="Main", alternative_labels="Alt")
-        self.assertEqual(node.labels, ["Main", "Alt"])
-
-    def test_node_labels_with_list_alternative(self) -> None:
-        """Test que alternative_labels com a llista es mantingui."""
-        node = Node(pk={"id": 1}, main_label="Main", alternative_labels=["A", "B"])
-        self.assertEqual(node.labels, ["Main", "A", "B"])
-
-    def test_relation_repr(self) -> None:
-        """Test que el repr d'una relacio sigui legible."""
-        src = Node(pk={"id": 1}, main_label="SrcNode")
-        dst = Node(pk={"id": 2}, main_label="DstNode")
-        rel = Relation(src, dst, "CONNECTS")
-        repr_str = repr(rel)
-        self.assertIn("src:", repr_str)
-        self.assertIn("dst:", repr_str)
-        self.assertIn("CONNECTS", repr_str)
-
-    def test_relation_getitem_type(self) -> None:
-        """Test que rel['type'] retorni el tipus."""
-        src = Node(pk={"id": 1}, main_label="SrcNode")
-        dst = Node(pk={"id": 2}, main_label="DstNode")
-        rel = Relation(src, dst, "TYPE1")
-        self.assertEqual(rel["type"], "TYPE1")
-
-    def test_relation_getitem_attributes_empty(self) -> None:
-        """Test que rel['attributes'] retorni None si no hi ha atributs."""
-        src = Node(pk={"id": 1}, main_label="SrcNode")
-        dst = Node(pk={"id": 2}, main_label="DstNode")
-        rel = Relation(src, dst, "TYPE1")
-        self.assertIsNone(rel["attributes"])
-
-    def test_relation_getitem_attributes_with_data(self) -> None:
-        """Test que rel['attributes'] retorni el dict si hi ha atributs."""
-        src = Node(pk={"id": 1}, main_label="SrcNode")
-        dst = Node(pk={"id": 2}, main_label="DstNode")
-        rel = Relation(src, dst, "TYPE1")
-        rel["custom"] = "value"
-        attrs = rel["attributes"]
-        self.assertIsInstance(attrs, dict)
-        self.assertIn("custom", attrs)
-
-    def test_relation_getitem_unknown_key(self) -> None:
-        """Test que rel['unknown'] llanci una excepcio."""
-        src = Node(pk={"id": 1}, main_label="SrcNode")
-        dst = Node(pk={"id": 2}, main_label="DstNode")
-        rel = Relation(src, dst, "TYPE1")
-        with self.assertRaises(Exception):
-            _ = rel["unknown_key"]
-
-    def test_node_getitem_unknown_key(self) -> None:
-        """Test que node['unknown'] llanci una excepcio."""
-        node = Node(pk={"id": 1}, main_label="TestNode")
-        with self.assertRaises(Exception):
-            _ = node["unknown_key"]
-
-    def test_node_pk_attributes(self) -> None:
-        """Test que node['pk_attributes'] retorni el pk."""
-        node = Node(pk={"id": 1, "name": "test"}, main_label="TestNode")
-        pk_attrs = node["pk_attributes"]
-        self.assertIsInstance(pk_attrs, dict)
-        self.assertIn("id", pk_attrs)
-        self.assertIn("name", pk_attrs)
 
 
 # ---------------------------------------------------------------------------

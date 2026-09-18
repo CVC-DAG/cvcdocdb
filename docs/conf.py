@@ -14,17 +14,17 @@ sys.path.insert(0, os.path.abspath(os.path.join("..")))
 _has_pandoc = shutil.which("pandoc") is not None
 
 # -- Project information -----------------------------------------------------
-project = "cvcdocdb Tools"
+project = "cvcdocdb"
 copyright = "2025, Oriol Ramos Terrades, Jialuo Chen, Adrià Molina"
 author = "Oriol Ramos Terrades, Jialuo Chen, Adrià Molina"
 
 # The full version, including alpha/beta/rc tags
 try:
-    from cvcdocdb import __version__ as drm_version  # noqa: E402
+    from cvcdocdb import __version__ as cvcdocdb_version  # noqa: E402
 except ImportError:
-    drm_version = None
+    cvcdocdb_version = None
 
-release = drm_version if drm_version else "1.1.0rc1"
+release = cvcdocdb_version if cvcdocdb_version else "1.1.0rc1"
 version = release
 
 # -- General configuration ---------------------------------------------------
@@ -117,11 +117,11 @@ html_theme_options = {
 nbsphinx_execute = "never"
 
 # Notebook link settings (can be overridden in CI/local env):
-# - DRM_DOCS_GITHUB_REPO, e.g. CVC-DAG/cvcdocdb-tools
+# - DRM_DOCS_GITHUB_REPO, e.g. CVC-DAG/cvcdocdb
 # - DRM_DOCS_GITHUB_REF, e.g. main, dev, feature/branch
 # - DRM_DOCS_LOCAL_JUPYTER_BASE, e.g. http://127.0.0.1:8888
 # - DRM_DOCS_LOCAL_NOTEBOOK_PREFIX, e.g. docs
-docs_github_repo = os.getenv("DRM_DOCS_GITHUB_REPO", "CVC-DAG/cvcdocdb-tools").strip("/")
+docs_github_repo = os.getenv("DRM_DOCS_GITHUB_REPO", "CVC-DAG/cvcdocdb").strip("/")
 docs_github_ref = os.getenv("DRM_DOCS_GITHUB_REF", "main").strip()
 
 # Local Jupyter base URL — must be set via env var; no default.
@@ -187,8 +187,8 @@ latex_elements = {}
 latex_documents = [
     (
         "index",
-        "cvcdocdb-tools.tex",
-        "cvcdocdb Tools Documentation",
+        "cvcdocdb.tex",
+        "cvcdocdb Documentation",
         "Oriol Ramos Terrades, Jialuo Chen, Adrià Molina",
         "manual",
     ),
@@ -224,8 +224,8 @@ def setup(app):
 man_pages = [
     (
         "index",
-        "cvcdocdb-tools",
-        "cvcdocdb Tools Documentation",
+        "cvcdocdb",
+        "cvcdocdb Documentation",
         ["Oriol Ramos Terrades, Jialuo Chen, Adrià Molina"],
         1,
     ),

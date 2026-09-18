@@ -26,12 +26,12 @@ Interactive explorations with widgets, vector search, and advanced features:
 .. toctree::
    :maxdepth: 1
 
-   notebooks/demos/ric_o_demo
-   notebooks/demos/ric_o_networkx_demo
    notebooks/interactive/weaknodes
    notebooks/demos/vector_search
    notebooks/demos/delete_strategies
    notebooks/demos/propagation_demo
+   notebooks/demos/ric_o_demo
+   notebooks/demos/ric_o_networkx_demo
 
 Dataset Examples
 ----------------

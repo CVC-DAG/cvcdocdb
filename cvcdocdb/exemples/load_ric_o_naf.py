@@ -21,7 +21,9 @@ Usage::
 
 from __future__ import annotations
 
+import json
 import os
+import time
 import urllib.request
 from typing import Any, Dict, List, Optional, Set, Tuple
 
@@ -38,12 +40,23 @@ except ImportError:  # pragma: no cover
 # URLs for the National Archives of France RiC-O examples
 # ---------------------------------------------------------------------------
 
-BASE_URL = "https://raw.githubusercontent.com/ICA-EGAD/RiC-O/master/examples/examples_v1-1/NationalArchivesOfFrance/rdf-xml"
+REPO_OWNER = "ICA-EGAD"
+REPO_NAME = "RiC-O"
+BRANCH = "master"
+VERSION = "examples_v0-1"  # v1-1 restructured; v0-1 has the original NAF files
+NAF_BASE = f"examples/{VERSION}/NationalArchivesOfFrance/rdf-xml"
 
-AGENT_URL = f"{BASE_URL}/agents"
-RECORD_URL = f"{BASE_URL}/recordResources"
-RELATION_URL = f"{BASE_URL}/relations"
-VOCAB_URL = f"{BASE_URL}/vocabularies"
+# GitHub API base (for listing directory contents)
+API_BASE = f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}/contents"
+
+# Raw content base (for downloading files)
+RAW_BASE = f"https://raw.githubusercontent.com/{REPO_OWNER}/{REPO_NAME}/{BRANCH}"
+
+# Category subdirectories within the NAF rdf-xml directory
+AGENT_URL = f"{RAW_BASE}/{NAF_BASE}/agents"
+RECORD_URL = f"{RAW_BASE}/{NAF_BASE}/recordResources"
+RELATION_URL = f"{RAW_BASE}/{NAF_BASE}/relations"
+VOCAB_URL = f"{RAW_BASE}/{NAF_BASE}/vocabularies"
 
 # Namespace for the RiC-O ontology
 ONTO_NS = "https://www.ica.org/standards/RiC/ontology#"
@@ -54,13 +67,13 @@ ONTO = Namespace(ONTO_NS)
 # ---------------------------------------------------------------------------
 
 RDF_TO_LABEL: Dict[str, str] = {
-    str(ONTO.Record): "Thing",
+    str(ONTO.Record): "Record",
     str(ONTO.Agent): "Agent",
     str(ONTO.CorporateBody): "CorporateBody",
     str(ONTO.Individual): "Person",
     str(ONTO.AgentName): "AgentName",
     str(ONTO.RecordResource): "RecordResource",
-    str(ONTO.RecordSet): "RecordResource",
+    str(ONTO.RecordSet): "RecordSet",
     str(ONTO.Instantiation): "Instantiation",
     str(ONTO.Activity): "Activity",
     str(ONTO.ActivityType): "ActivityType",
@@ -87,10 +100,16 @@ RDF_TO_LABEL: Dict[str, str] = {
     str(ONTO.Extent): "Extent",
     str(ONTO.ExtentType): "ExtentType",
     str(ONTO.UnitOfMeasurement): "UnitOfMeasurement",
+    str(ONTO.ContentType): "ContentType",
     str(ONTO.DemographicGroup): "DemographicGroup",
     str(ONTO.LegalStatus): "LegalStatus",
     str(ONTO.Mandate): "Mandate",
     str(ONTO.MandateType): "MandateType",
+    str(ONTO.OccupationType): "OccupationType",
+    str(ONTO.Proxy): "Proxy",
+    str(ONTO.RecordPart): "RecordPart",
+    str(ONTO.Relation): "Relation",
+    str(ONTO.Type): "Type",
 }
 
 # ---------------------------------------------------------------------------
@@ -98,8 +117,52 @@ RDF_TO_LABEL: Dict[str, str] = {
 # ---------------------------------------------------------------------------
 
 
+def _http_get(url: str, headers: Optional[Dict[str, str]] = None,
+              retries: int = 3, backoff: float = 2.0) -> bytes:
+    """HTTP GET with exponential backoff retry.
+
+    Args:
+        url: The URL to fetch.
+        headers: Optional HTTP headers.
+        retries: Number of retries on transient errors.
+        backoff: Initial backoff in seconds.
+
+    Returns:
+        Response body as bytes.
+    """
+    if headers is None:
+        headers = {}
+    for attempt in range(retries):
+        req = urllib.request.Request(url, headers=headers)
+        try:
+            with urllib.request.urlopen(req, timeout=60) as resp:
+                return resp.read()
+        except urllib.error.HTTPError as e:
+            if e.code == 429:  # Rate limited
+                wait = backoff * (2 ** attempt)
+                print(f"    Rate limited ({e.code}), retrying in {wait:.1f}s...")
+                time.sleep(wait)
+            elif e.code in (502, 503, 504):  # Transient server errors
+                wait = backoff * (2 ** attempt)
+                print(f"    Server error ({e.code}), retrying in {wait:.1f}s...")
+                time.sleep(wait)
+            else:
+                raise
+        except urllib.error.URLError:
+            if attempt < retries - 1:
+                wait = backoff * (2 ** attempt)
+                print(f"    Connection error, retrying in {wait:.1f}s...")
+                time.sleep(wait)
+            else:
+                raise
+    raise RuntimeError(f"Failed to fetch {url} after {retries} retries")
+
+
 def _list_github_dir(url: str) -> List[str]:
     """List files in a GitHub raw directory URL.
+
+    Uses the GitHub API to list directory contents since raw URLs
+    do not support directory listing.
 
     Args:
         url: The GitHub raw URL of the directory.
@@ -107,11 +170,36 @@ def _list_github_dir(url: str) -> List[str]:
     Returns:
         List of filenames.
     """
-    req = urllib.request.Request(url, headers={"User-Agent": "cvcdocdb-rico/1.0"})
-    with urllib.request.urlopen(req, timeout=30) as resp:
-        data = resp.read().decode("utf-8")
+    # Convert raw URL to API path:
+    # https://raw.githubusercontent.com/ICA-EGAD/RiC-O/master/examples_v0-1/.../agents
+    # -> examples_v0-1/.../agents
+    path = url
+    for prefix in (
+        f"https://raw.githubusercontent.com/{REPO_OWNER}/{REPO_NAME}/{BRANCH}/",
+        f"https://raw.githubusercontent.com/{REPO_OWNER}/{REPO_NAME}/",
+    ):
+        if path.startswith(prefix):
+            path = path[len(prefix):]
+            break
 
-    return [line.strip() for line in data.splitlines() if line.strip().endswith(".rdf")]
+    api_url = f"{API_BASE}/{path}"
+    headers = {
+        "User-Agent": f"cvcdocdb-rico/1.0",
+        "Accept": "application/vnd.github.v3+json",
+    }
+
+    data_bytes = _http_get(api_url, headers)
+    data = json.loads(data_bytes.decode("utf-8"))
+
+    if isinstance(data, dict) and "message" in data:
+        # Directory doesn't exist or is empty — try listing parent and filtering
+        return []
+
+    return [
+        item["name"]
+        for item in data
+        if isinstance(item, dict) and item.get("type") == "file" and item["name"].endswith(".rdf")
+    ]
 
 
 def _download_file(url: str) -> bytes:
@@ -123,9 +211,7 @@ def _download_file(url: str) -> bytes:
     Returns:
         The file content as bytes.
     """
-    req = urllib.request.Request(url, headers={"User-Agent": "cvcdocdb-rico/1.0"})
-    with urllib.request.urlopen(req, timeout=60) as resp:
-        return resp.read()
+    return _http_get(url, headers={"User-Agent": "cvcdocdb-rico/1.0"})
 
 
 # ---------------------------------------------------------------------------
@@ -293,22 +379,38 @@ def _extract_nodes(
 
 # Map of RiC-O properties → (rel_type, src_label, dst_label)
 # Used to generate Cypher MERGE for relationships
+# Both old (hasOrHad/isOrWas) and new (has/is) property names are supported.
 RELATION_MAP: Dict[str, Tuple[str, str, str]] = {
+    # ── Organic provenance ──────────────────────────────────────────
     str(ONTO.hasOrganicProvenance): ("HAS_ORGANIC_PROVENANCE", "RecordResource", "Agent"),
+    str(ONTO.isProvenanceOf): ("IS_ORGANIC_PROVENANCE_OF", "Agent", "RecordResource"),
     str(ONTO.isOrWasOrganicProvenanceOf): ("IS_ORGANIC_PROVENANCE_OF", "Agent", "RecordResource"),
-    str(ONTO.directlyIncludes): ("DIRECTLY_INCLUDES", "RecordResource", "RecordResource"),
-    str(ONTO.isDirectlyIncludedIn): ("IS_DIRECTLY_INCLUDED_IN", "RecordResource", "RecordResource"),
+    # ── Instantiation ───────────────────────────────────────────────
+    str(ONTO.hasInstantiation): ("HAS_INSTANTIATION", "RecordResource", "Instantiation"),
     str(ONTO.hasOrHadInstantiation): ("HAS_INSTANTIATION", "RecordResource", "Instantiation"),
+    str(ONTO.instantiates): ("IS_INSTANTIATION_OF", "Instantiation", "RecordResource"),
     str(ONTO.isOrWasInstantiationOf): ("IS_INSTANTIATION_OF", "Instantiation", "RecordResource"),
+    # ── Holder / held by ────────────────────────────────────────────
+    str(ONTO.heldBy): ("HAS_HOLDER", "Instantiation", "Agent"),
     str(ONTO.hasOrHadHolder): ("HAS_HOLDER", "Instantiation", "Agent"),
+    # ── Location ────────────────────────────────────────────────────
     str(ONTO.hasOrHadLocation): ("HAS_LOCATION", "Instantiation", "PhysicalLocation"),
+    # ── Agent names ─────────────────────────────────────────────────
+    str(ONTO.hasAgentName): ("HAS_AGENT_NAME", "Agent", "AgentName"),
     str(ONTO.hasOrHadAgentName): ("HAS_AGENT_NAME", "Agent", "AgentName"),
+    str(ONTO.isAgentNameOf): ("IS_AGENT_NAME_OF", "AgentName", "Agent"),
     str(ONTO.isOrWasAgentNameOf): ("IS_AGENT_NAME_OF", "AgentName", "Agent"),
+    # ── Creator / created by ────────────────────────────────────────
+    str(ONTO.createdBy): ("HAS_CREATOR", "Thing", "Agent"),
     str(ONTO.hasOrHadCreator): ("HAS_CREATOR", "Thing", "Agent"),
     str(ONTO.hasCreator): ("HAS_CREATOR", "Thing", "Agent"),
     str(ONTO.hasPublisher): ("HAS_PUBLISHER", "Thing", "Agent"),
+    # ── Description relations ───────────────────────────────────────
+    str(ONTO.describedBy): ("IS_DESCRIBED_BY", "Agent", "Thing"),
     str(ONTO.isOrWasDescribedBy): ("IS_DESCRIBED_BY", "Agent", "Thing"),
+    str(ONTO.describes): ("DESCRIBES_OR_DESCRIBED", "Thing", "Agent"),
     str(ONTO.describesOrDescribed): ("DESCRIBES_OR_DESCRIBED", "Thing", "Agent"),
+    # ── Agent-to-Agent relations ────────────────────────────────────
     str(ONTO.hasOrHadController): ("HAS_CONTROLLER", "Agent", "Agent"),
     str(ONTO.hasOrHadEmployer): ("HAS_EMPLOYER", "Agent", "Agent"),
     str(ONTO.hasOrHadMember): ("HAS_MEMBER", "Group", "Agent"),
@@ -317,39 +419,77 @@ RELATION_MAP: Dict[str, Tuple[str, str, str]] = {
     str(ONTO.hasOrHadTeacher): ("HAS_TEACHER", "Agent", "Agent"),
     str(ONTO.hasOrHadChild): ("HAS_CHILD", "Agent", "Agent"),
     str(ONTO.hasOrHadParent): ("HAS_PARENT", "Agent", "Agent"),
+    # ── Hierarchical relations ──────────────────────────────────────
+    str(ONTO.agentIsSourceOfAgentHierarchicalRelation): (
+        "HAS_HIERARCHICAL_RELATION", "Agent", "Agent"
+    ),
     str(ONTO.hasOrHadHierarchicalRelation): ("HAS_HIERARCHICAL_RELATION", "Agent", "Agent"),
+    # ── Temporal relations ──────────────────────────────────────────
     str(ONTO.hasOrHadTemporalRelation): ("HAS_TEMPORAL_RELATION", "Agent", "Agent"),
+    # ── Agent-to-agent relation proxy ───────────────────────────────
+    str(ONTO.agentIsConnectedToAgentRelation): ("HAS_AGENT_TO_AGENT_RELATION", "Agent", "Agent"),
     str(ONTO.hasOrHadAgentToAgentRelation): ("HAS_AGENT_TO_AGENT_RELATION", "Agent", "Agent"),
+    # ── Subject / mainsubject ───────────────────────────────────────
     str(ONTO.hasOrHadSubject): ("HAS_SUBJECT", "RecordResource", "Thing"),
     str(ONTO.hasOrHadMainsubject): ("HAS_MAIN_SUBJECT", "RecordResource", "Thing"),
+    # ── Language ────────────────────────────────────────────────────
+    str(ONTO.hasLanguage): ("HAS_LANGUAGE", "Thing", "Language"),
     str(ONTO.hasOrHadLanguage): ("HAS_LANGUAGE", "Thing", "Language"),
+    # ── Documentary form type ───────────────────────────────────────
+    str(ONTO.hasDocumentaryFormType): ("HAS_DOCUMENTARY_FORM_TYPE", "Thing", "DocumentaryFormType"),
     str(ONTO.hasOrHadDocumentaryFormType): ("HAS_DOCUMENTARY_FORM_TYPE", "Thing", "DocumentaryFormType"),
+    # ── Corporate body type ─────────────────────────────────────────
     str(ONTO.hasOrHadCorporateBodyType): ("HAS_CORPORATE_BODY_TYPE", "CorporateBody", "CorporateBodyType"),
+    # ── Identifier ──────────────────────────────────────────────────
     str(ONTO.hasOrHadIdentifier): ("HAS_IDENTIFIER", "Agent", "Identifier"),
+    # ── Birth / death dates ─────────────────────────────────────────
     str(ONTO.hasOrHadBirthDate): ("HAS_BIRTH_DATE", "Agent", "Date"),
     str(ONTO.hasOrHadDeathDate): ("HAS_DEATH_DATE", "Agent", "Date"),
     str(ONTO.hasOrHadBirthPlace): ("HAS_BIRTH_PLACE", "Agent", "PhysicalLocation"),
     str(ONTO.hasOrHadDeathPlace): ("HAS_DEATH_PLACE", "Agent", "PhysicalLocation"),
+    # ── Occupation ──────────────────────────────────────────────────
     str(ONTO.hasOrHadOccupation): ("HAS_OCCUPATION", "Agent", "OccupationType"),
+    # ── Position / role ─────────────────────────────────────────────
     str(ONTO.hasOrHadPosition): ("HAS_POSITION", "Agent", "Position"),
     str(ONTO.hasOrHadRole): ("HAS_ROLE", "Agent", "RoleType"),
+    # ── RecordResource properties ───────────────────────────────────
     str(ONTO.hasOrHadDate): ("HAS_DATE", "RecordResource", "Date"),
     str(ONTO.hasOrHadTitle): ("HAS_TITLE", "RecordResource", "Title"),
     str(ONTO.hasOrHadExtent): ("HAS_EXTENT", "RecordResource", "Extent"),
     str(ONTO.hasOrHadContentType): ("HAS_CONTENT_TYPE", "RecordResource", "ContentType"),
     str(ONTO.hasOrHadRecordState): ("HAS_RECORD_STATE", "RecordResource", "RecordState"),
+    str(ONTO.hasLegalStatus): ("HAS_LEGAL_STATUS", "RecordResource", "LegalStatus"),
     str(ONTO.hasOrHadLegalStatus): ("HAS_LEGAL_STATUS", "RecordResource", "LegalStatus"),
     str(ONTO.hasOrHadCreationDate): ("HAS_CREATION_DATE", "RecordResource", "Date"),
     str(ONTO.hasOrHadPublicationDate): ("HAS_PUBLICATION_DATE", "RecordResource", "Date"),
     str(ONTO.hasOrHadModificationDate): ("HAS_MODIFICATION_DATE", "RecordResource", "Date"),
     str(ONTO.hasOrHadMigrationDate): ("HAS_MIGRATION_DATE", "RecordResource", "Date"),
+    # ── Instantiation-to-instantiation relations ────────────────────
     str(ONTO.hasOrHadDerivationRelation): ("HAS_DERIVATION_RELATION", "Instantiation", "Instantiation"),
     str(ONTO.hasOrHadAnalogueInstantiation): ("HAS_ANALOGUE_INSTANTIATION", "Instantiation", "Instantiation"),
     str(ONTO.hasOrHadDigitalInstantiation): ("HAS_DIGITAL_INSTANTIATION", "Thing", "Instantiation"),
+    # ── RecordResource-to-RecordResource relations ──────────────────
     str(ONTO.hasOrHadDirectPart): ("HAS_DIRECT_PART", "RecordResource", "RecordResource"),
     str(ONTO.isOrWasPartOf): ("IS_PART_OF", "RecordResource", "RecordResource"),
     str(ONTO.directlyPrecedesInSequence): ("DIRECTLY_PRECEDES", "RecordResource", "RecordResource"),
+    # ── Activity relations ──────────────────────────────────────────
     str(ONTO.isOrWasAffectedBy): ("IS_AFFECTED_BY", "Thing", "Activity"),
+    # ── Activity type ───────────────────────────────────────────────
+    str(ONTO.hasActivityType): ("HAS_ACTIVITY_TYPE", "Activity", "ActivityType"),
+    # ── Performance relations ───────────────────────────────────────
+    str(ONTO.agentIsTargetOfPerformanceRelation): ("HAS_PERFORMANCE_TARGET", "PerformanceRelation", "Agent"),
+    str(ONTO.agentIsSourceOfPerformanceRelation): ("HAS_PERFORMANCE_SOURCE", "Activity", "PerformanceRelation"),
+    str(ONTO.performanceRelationHasTarget): ("HAS_PERFORMANCE_TARGET", "PerformanceRelation", "Agent"),
+    # ── Group subdivision ───────────────────────────────────────────
+    str(ONTO.groupIsSourceOfGroupSubdivisionRelation): (
+        "HAS_GROUP_SUBDIVISION", "Group", "Group"
+    ),
+    # ── Agent origination relation ──────────────────────────────────
+    str(ONTO.agentIsTargetOfAgentOriginationRelation): (
+        "HAS_AGENT_ORIGINATION", "AgentOriginationRelation", "Agent"
+    ),
+    # ── Rules ───────────────────────────────────────────────────────
+    str(ONTO.regulatedBy): ("HAS_REGULATING_RULE", "Thing", "Rule"),
 }
 
 

@@ -1,8 +1,10 @@
-# Document Representation Model (cvcdocdb)
+# Document Representation Models
 
-Graph-based document representation library with Neo4j and an in-memory NetworkX backend.
+Archives, libraries, and document collections are rarely flat files: documents have internal structure -- pages, sections, regions, entities -- and rich relationships to other documents, people, places, and events. A **Document Representation Model (DRM)** captures this structure as a graph, where nodes stand for the objects that make up (or are described by) a document, and typed edges capture how those objects relate to, contain, or depend on one another. This graph-first view makes document content queryable, composable, and reusable across archival, historical, and document-analysis workflows.
 
-Model documents as graphs where nodes represent document objects (text regions, figures, pages) and edges capture their relationships. The library supports semantic entity definitions, weak nodes with cascade delete, foreign key validation, vector search, and reusable example datasets for tutorials.
+## CVCDocDB
+
+**CVCDocDB** is a Python library developed by the Document Analysis Group (DAG) at the [Centre de Visió per Computador](https://www.cvc.uab.es/) (CVC), within the framework of the **SUKIDI** project, to represent the contents of documents according to a Document Representation Model. It offers a graph-based API with two interchangeable backends -- a persistent Neo4j store and an in-memory NetworkX store for testing and tutorials -- together with semantic entity definitions, WeakNode hierarchies with cascade delete, foreign key validation, vector search, and ready-to-run example datasets for getting started quickly.
 
 ## Features
 
@@ -34,7 +36,7 @@ pip install -e .
 Register the recommended Jupyter kernel for tutorials:
 
 ```bash
-python -m ipykernel install --user --name cvcdocdb-tool --display-name "Python (cvcdocdb-tool)"
+python -m ipykernel install --user --name cvcdocdb --display-name "Python (cvcdocdb)"
 ```
 
 ## Quick Start
@@ -164,7 +166,7 @@ graph.close()
 
 ## Configuration
 
-DRM uses environment variables for Neo4j connections. Multiple targets are supported via the `NEO4J_TARGET` selector:
+CVCDocDB uses environment variables for Neo4j connections. Multiple targets are supported via the `NEO4J_TARGET` selector:
 
 ```bash
 # Default target
@@ -189,9 +191,9 @@ python -m pytest test/ -v
 
 Three test levels:
 
-- **Unit** (`-m unit`) -- 43 tests, ~2s, fast, no graph store
-- **Integration** (`-m integration`) -- 215 tests, ~3s, NetworkXGraph (in-memory)
-- **Neo4j** (`-m slow`) -- 44 tests, ~10s, Neo4j (requires real DB)
+- **Unit** (`-m unit`) -- fast, no graph store
+- **Integration** (`-m integration`) -- NetworkXGraph (in-memory)
+- **Neo4j** (`-m slow`) -- requires a real Neo4j connection; auto-skipped otherwise
 
 Skip Neo4j tests: `pytest test/ -v -m "not slow"`
 

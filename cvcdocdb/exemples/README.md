@@ -10,7 +10,7 @@ Aquest directori conté loaders de datasets per tutorials:
 ## Ús ràpid
 
 ```python
-from drm import NetworkXGraph
+from cvcdocdb import NetworkXGraph
 from cvcdocdb.exemples import load_karate_club, load_bibliografia_openalex
 
 graph = NetworkXGraph()

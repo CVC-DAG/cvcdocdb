@@ -5,6 +5,45 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0a2] - 2026-09-18
+
+### Security
+
+- **Code-injection prevention in `schema_gen.py`** — untrusted, ontology-derived
+  strings (class names, property names, `rdfs:comment` docstrings) are now
+  validated as safe Python identifiers or escaped with `repr()` before being
+  spliced into generated entity-class source, closing an arbitrary-code-execution
+  path via a crafted RDF/OWL ontology.
+- **Cypher-injection prevention in `neo4j_graph.py`** — `pk` values, node
+  labels, and relation types are now escaped/validated before being
+  interpolated into `WHERE`/`MERGE`/`MATCH` clauses.
+- **Hardened default pickle persistence path in `networkx_graph.py`** —
+  `NetworkXGraph()`'s default persistence file now lives in a per-user,
+  permission-restricted cache directory instead of the shared system temp
+  dir, and refuses to unpickle a file it doesn't own.
+
+### Fixed
+
+- **`Node.__getitem__`/`__setitem__`** — custom attributes set via kwargs
+  are now readable through the dict-like interface, and `node["pk"] = ...`
+  no longer raises `KeyError`.
+- **`_mergePK`** — no longer mutates the caller's own `pk` dict in place.
+
+### Changed
+
+- **Package renamed `drm` → `cvcdocdb`** — the source package directory, all
+  imports, `setup.py` metadata (`drm-tools` → `cvcdocdb`), docs, and example
+  scripts now use the `cvcdocdb` name throughout, matching the project's
+  actual distribution name. Older changelog entries below still reference
+  `drm/...` paths as they existed at the time; they are left as a historical
+  record rather than rewritten.
+- **Test suite reorganized** — unit tests misclassified inside
+  `test_drm.py` moved to `test_node.py`/`test_relation.py`; `slow` (Neo4j)
+  tests now auto-skip with a clear reason when no server is reachable
+  instead of failing on connection timeouts.
+- **README restructured** — general "Document Representation Models"
+  introduction added before the CVCDocDB-specific section.
+
 ## [1.1.0] - 2026-07-13
 
 ### Added

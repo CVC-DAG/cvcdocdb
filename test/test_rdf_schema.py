@@ -1,4 +1,4 @@
-"""Tests for RDF ontology → cvcdocdb YAML schema conversion."""
+"""Tests for RDF ontology → DRM YAML schema conversion."""
 
 from __future__ import annotations
 
@@ -65,7 +65,7 @@ ex:knows a owl:ObjectProperty ;
 
 
 class RDFSchemaTest(unittest.TestCase):
-    """Tests for converting RDF ontology to cvcdocdb YAML schema."""
+    """Tests for converting RDF ontology to DRM YAML schema."""
 
     def setUp(self) -> None:
         self.tmpdir = tempfile.mkdtemp()
@@ -308,7 +308,7 @@ class GenerateClassesFromRDFTest(unittest.TestCase):
         yaml_str = rdf_to_yaml(self.ontology_path, "test", ontology_ns="http://example.org/")
         source = generate_classes(yaml_str)
         self.assertIn("parent=parent", source)
-        self.assertIn('parent_relation="HAS_SECTION"', source)
+        self.assertIn("parent_relation='HAS_SECTION'", source)
 
     def test_generated_code_compiles(self) -> None:
         """Generated source is valid Python."""
