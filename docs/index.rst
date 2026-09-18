@@ -1,7 +1,7 @@
 cvcdocdb Documentation
-=======================
+======================
 
-Document Representation Model (DRM) is a Python library for graph-based
+cvcdocdb (Document Representation Model) is a Python library for graph-based
 document representation with Neo4j and an in-memory NetworkX backend.
 
 .. toctree::
