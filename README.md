@@ -4,7 +4,7 @@ Archives, libraries, and document collections are rarely flat files: documents h
 
 ## CVCDocDB
 
-**CVCDocDB** is a Python library developed by the Document Image group at the [Centre de Visió per Computador](https://www.cvc.uab.es/) (CVC), within the framework of the **SUKIDI** project, to represent the contents of documents according to a Document Representation Model. It offers a graph-based API with two interchangeable backends -- a persistent Neo4j store and an in-memory NetworkX store for testing and tutorials -- together with semantic entity definitions, WeakNode hierarchies with cascade delete, foreign key validation, vector search, and ready-to-run example datasets for getting started quickly.
+**CVCDocDB** is a Python library developed by the Document Analysis Group (DAG) at the [Centre de Visió per Computador](https://www.cvc.uab.es/) (CVC), within the framework of the **SUKIDI** project, to represent the contents of documents according to a Document Representation Model. It offers a graph-based API with two interchangeable backends -- a persistent Neo4j store and an in-memory NetworkX store for testing and tutorials -- together with semantic entity definitions, WeakNode hierarchies with cascade delete, foreign key validation, vector search, and ready-to-run example datasets for getting started quickly.
 
 ## Features
 
