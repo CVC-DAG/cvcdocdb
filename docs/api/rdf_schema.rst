@@ -2,7 +2,7 @@ RDF / OWL ontology conversion
 ==============================
 
 The :mod:`cvcdocdb.rdf_schema` module provides the full pipeline for converting
-RDF/OWL ontologies into DRM YAML schemas and Python entity classes.
+RDF/OWL ontologies into CVCDocDB YAML schemas and Python entity classes.
 
 Supported input formats
 -----------------------
@@ -10,11 +10,11 @@ Supported input formats
 Turtle (``.ttl``), RDF/XML (``.rdf``), N-Triples (``.nt``), N-Quads (``.nq``),
 TriX (``.trix``), Trig (``.trig``), and JSON-LD (``.jsonld``).
 
-OWL constructs mapped to DRM
------------------------------
+OWL constructs mapped to CVCDocDB
+---------------------------------
 
 +--------------------------+------------------------------------------+
-| RDF / OWL construct      | DRM mapping                              |
+| RDF / OWL construct      | CVCDocDB mapping                         |
 +--------------------------+------------------------------------------+
 | ``owl:Class``            | Node label                               |
 +--------------------------+------------------------------------------+
