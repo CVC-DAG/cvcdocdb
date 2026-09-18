@@ -1,4 +1,4 @@
-"""Convert RDF/OWL ontology to DRM YAML schema.
+"""Convert RDF/OWL ontology to CVCDocDB YAML schema.
 
 Parses an RDF file (Turtle, RDF/XML, N-Triples, etc.) and produces a YAML
 schema compatible with ``cvcdocdb.schema_gen.generate_classes()``.
@@ -112,7 +112,7 @@ def download_ontology_and_convert(
 ) -> str:
     """Download an RDF ontology, convert to YAML, and generate Python classes.
 
-    Convenience function that downloads the ontology, converts it to DRM YAML
+    Convenience function that downloads the ontology, converts it to CVCDocDB YAML
     schema, and writes the Python entity classes to a file.
 
     Args:
@@ -156,7 +156,7 @@ def rdf_to_yaml(
     db_name: str,
     ontology_ns: Optional[str] = None,
 ) -> str:
-    """Convert an RDF/OWL ontology to a DRM YAML schema.
+    """Convert an RDF/OWL ontology to a CVCDocDB YAML schema.
 
     Args:
         source: Path to the RDF file or a URL.
