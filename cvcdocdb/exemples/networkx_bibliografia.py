@@ -11,6 +11,7 @@ import urllib.request
 from typing import Dict, List
 
 from cvcdocdb.base import Node, Relation
+from cvcdocdb.exemples._http import read_capped
 
 
 OPENALEX_BASE_URL = "https://api.openalex.org/works"
@@ -46,7 +47,7 @@ def _download_openalex_works(query: str, per_page: int = 20, mailto: str | None 
     req = urllib.request.Request(url, headers={"User-Agent": "cvcdocdb-examples/1.0"})
     try:
         with urllib.request.urlopen(req, timeout=20) as resp:
-            payload = json.loads(resp.read().decode("utf-8"))
+            payload = json.loads(read_capped(resp, url=url).decode("utf-8"))
         return payload.get("results", [])
     except Exception:
         # Keep the tutorial runnable offline or in restrictive SSL environments.

@@ -55,6 +55,11 @@ try:
 except ImportError:  # pragma: no cover
     yaml = None
 
+# Cap on downloaded ontology size, so a compromised/misbehaving server
+# cannot force download_ontology() to buffer an unbounded response in memory.
+MAX_ONTOLOGY_BYTES = 50 * 1024 * 1024  # 50 MB
+_DOWNLOAD_CHUNK_SIZE = 65536
+
 # URIs for OWL constructs not in rdflib's OWL namespace
 OWL_HAS_KEY = URIRef("http://www.w3.org/2002/07/owl#hasKey")
 OWL_UNIQUE_IDENTITY = URIRef("http://www.w3.org/2002/07/owl#uniqueIdentity")
@@ -95,7 +100,20 @@ def download_ontology(
 
     req = urllib.request.Request(url, headers={"User-Agent": "cvcdocdb-rdf/1.0"})
     with urllib.request.urlopen(req, timeout=60) as resp:
-        data = resp.read()
+        chunks = []
+        total = 0
+        while True:
+            chunk = resp.read(_DOWNLOAD_CHUNK_SIZE)
+            if not chunk:
+                break
+            total += len(chunk)
+            if total > MAX_ONTOLOGY_BYTES:
+                raise ValueError(
+                    f"Ontology at {url} exceeded the {MAX_ONTOLOGY_BYTES} "
+                    "byte limit; aborting download."
+                )
+            chunks.append(chunk)
+        data = b"".join(chunks)
 
     with open(out_path, "wb") as f:
         f.write(data)

@@ -27,6 +27,7 @@ import time
 import urllib.request
 from typing import Any, Dict, List, Optional, Set, Tuple
 
+from cvcdocdb.exemples._http import read_capped
 from cvcdocdb.neo4j_graph import _validate_cypher_identifier
 
 try:
@@ -138,7 +139,7 @@ def _http_get(url: str, headers: Optional[Dict[str, str]] = None,
         req = urllib.request.Request(url, headers=headers)
         try:
             with urllib.request.urlopen(req, timeout=60) as resp:
-                return resp.read()
+                return read_capped(resp, url=url)
         except urllib.error.HTTPError as e:
             if e.code == 429:  # Rate limited
                 wait = backoff * (2 ** attempt)
