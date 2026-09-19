@@ -118,12 +118,22 @@ class GenerateClassesTest(unittest.TestCase):
         self.assertIn("from cvcdocdb.base import Node, WeakNode, Relation, WeakRelation", source)
 
     def test_node_has_pk_and_properties(self) -> None:
-        """Node class has pk parameter and property attributes."""
+        """Node class has pk parameter and type-annotated properties."""
         source = generate_classes(self._yaml())
-        # Character has house and name properties
-        self.assertIn("self.house = ", source)
-        self.assertIn("self.name = ", source)
+        # Character has house and name properties, declared as bare
+        # annotations (never assigned in __init__ — see module docstring).
+        self.assertIn("house: Optional[str]", source)
+        self.assertIn("name: Optional[str]", source)
         self.assertIn("pk=pk", source)
+
+    def test_properties_are_not_assigned_in_init(self) -> None:
+        """Property annotations must never become an assignment in
+        __init__ — that's exactly the pattern that corrupted partial
+        merges (see test_generated_class_partial_update_preserves_fields)."""
+        source = generate_classes(self._yaml())
+        self.assertNotIn("self.house = ", source)
+        self.assertNotIn("self.name = ", source)
+        self.assertNotIn("kwargs.get(", source)
 
     def test_weaknode_has_parent(self) -> None:
         """WeakNode class sets parent and parent_relation."""
@@ -161,6 +171,48 @@ class GenerateClassesTest(unittest.TestCase):
 # ---------------------------------------------------------------------------
 # generate_file
 # ---------------------------------------------------------------------------
+
+
+class GeneratedClassPartialUpdateTest(unittest.TestCase):
+    """Regression test: a generated entity class must never corrupt an
+    existing node's untouched fields on a partial `insertNode(update=True)`
+    merge (bug found integrating this generator into a downstream app —
+    every unspecified field, including PK fields, was defaulting to the
+    literal type-name string, e.g. `email="string"`, wiping real data)."""
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.mkdtemp()
+        path = os.path.join(self.tmp, "users.pkl")
+        self.graph = NetworkXGraph(persistence_path=path)
+        self.graph.insertNode(Node(
+            pk={"email": "a@example.org"}, main_label="User",
+            nom="Real Name", password="hash123", role="admin", is_owner=True,
+        ))
+
+    def tearDown(self) -> None:
+        self.graph.close()
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _generated_user_class(self):
+        source = generate_classes(self.graph.schema_yaml("users_db"))
+        namespace: dict = {}
+        exec(compile(source, "<generated>", "exec"), namespace)
+        return namespace["User"]
+
+    def test_generated_class_partial_update_preserves_fields(self) -> None:
+        User = self._generated_user_class()
+
+        # Only touch is_owner — nom/password/role/email must survive untouched.
+        self.graph.insertNode(
+            User(pk={"email": "a@example.org"}, is_owner=False), update=True,
+        )
+
+        props = self.graph.query({"main_label": "User"})[0]["properties"]
+        self.assertEqual(props["email"], "a@example.org")
+        self.assertEqual(props["nom"], "Real Name")
+        self.assertEqual(props["password"], "hash123")
+        self.assertEqual(props["role"], "admin")
+        self.assertEqual(props["is_owner"], False)
 
 
 class GenerateFileTest(unittest.TestCase):

@@ -45,6 +45,66 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   no longer raises `KeyError`.
 - **`_mergePK`** — no longer mutates the caller's own `pk` dict in place.
 
+### Fixed
+
+- **`schema_gen.py` generated classes corrupted partial `insertNode`/`insertRelation`
+  merges** — every generated `Node`/`Relation`/`WeakNode` subclass unconditionally
+  assigned `self.<prop> = kwargs.get("<prop>", "<type-name>")` for every schema
+  property in `__init__`, including primary-key fields. Since `Node.__init__`/
+  `Relation.__init__` already set an attribute for whatever kwargs the caller
+  actually passes, this line only mattered when the caller *omitted* a field —
+  in which case it invented that attribute with the literal type-name string
+  (`"string"`, `"integer"`, ...) as its value. Because `update=True` merges
+  send every attribute present on the object, this silently overwrote the
+  field's real stored value on any partial update (e.g. `User(pk={"email": e},
+  is_owner=False)` would blank out `nom`/`password`/`role` to the literal
+  string `"string"`). Properties are now declared as bare class-level type
+  annotations (`prop: Optional[str]`) instead — these inform IDEs/type
+  checkers but never touch the instance `__dict__`, so a generated class can
+  no longer invent a value for a field the caller didn't pass. Added a
+  regression test (`test_generated_class_partial_update_preserves_fields`)
+  that reproduces the corruption end-to-end through `NetworkXGraph`.
+
+## [1.0.0a3] - 2026-09-19
+
+### Security
+
+- **Complete label validation in `neo4j_graph.py`'s `insertNode`** — the
+  1.0.0a2 fix only validated `main_label`; `alternative_labels` and
+  dependency nodes (inserted via the internal `_insertNode` path) were
+  not checked and could still inject Cypher through the node's label
+  list. Validation now runs inside `_insertNode` itself, covering every
+  path that reaches it.
+- **Parameterized Cypher in the RiC-O/NAF example loader** — `cvcdocdb.exemples.load_ric_o_naf`
+  built Cypher via raw string interpolation of node/relationship ids and
+  property values extracted from RDF/XML downloaded from GitHub,
+  bypassing the validators added in 1.0.0a2. Now uses `Neo4jGraph.query()`'s
+  `params` argument instead of splicing untrusted values into query text.
+
+## [1.0.0a2] - 2026-09-18
+
+### Security
+
+- **Code-injection prevention in `schema_gen.py`** — untrusted, ontology-derived
+  strings (class names, property names, `rdfs:comment` docstrings) are now
+  validated as safe Python identifiers or escaped with `repr()` before being
+  spliced into generated entity-class source, closing an arbitrary-code-execution
+  path via a crafted RDF/OWL ontology.
+- **Cypher-injection prevention in `neo4j_graph.py`** — `pk` values, node
+  labels, and relation types are now escaped/validated before being
+  interpolated into `WHERE`/`MERGE`/`MATCH` clauses.
+- **Hardened default pickle persistence path in `networkx_graph.py`** —
+  `NetworkXGraph()`'s default persistence file now lives in a per-user,
+  permission-restricted cache directory instead of the shared system temp
+  dir, and refuses to unpickle a file it doesn't own.
+
+### Fixed
+
+- **`Node.__getitem__`/`__setitem__`** — custom attributes set via kwargs
+  are now readable through the dict-like interface, and `node["pk"] = ...`
+  no longer raises `KeyError`.
+- **`_mergePK`** — no longer mutates the caller's own `pk` dict in place.
+
 ### Changed
 
 - **Package renamed `drm` → `cvcdocdb`** — the source package directory, all

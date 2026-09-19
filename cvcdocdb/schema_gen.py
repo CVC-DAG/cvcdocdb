@@ -22,18 +22,20 @@ Output structure::
     class Character(Node):
         \"\"\"Auto-generated from schema.\"\"\"
 
+        house: Optional[str]
+        name: Optional[str]
+
         def __init__(self, pk, **kwargs):
             super().__init__(pk=pk, main_label="Character", **kwargs)
-            self.house = kwargs.get("house", "")
-            self.name = kwargs.get("name", "")
 
     class Section(WeakNode):
         \"\"\"Auto-generated from schema.\"\"\"
 
+        title: Optional[str]
+
         def __init__(self, parent, **kwargs):
             super().__init__(parent=parent, main_label="Section",
                              parent_relation="HAS_SECTION", **kwargs)
-            self.title = kwargs.get("title", "")
 
     class Knows(Relation):
         \"\"\"Auto-generated from schema.\"\"\"
@@ -47,6 +49,17 @@ Output structure::
         def __init__(self, src, dst, **kwargs):
             super().__init__(src=src, dst=dst, rel_type="HAS_SECTION",
                              propagate=True, **kwargs)
+
+Note: properties are declared as bare class-level type annotations
+(``name: Optional[str]``), not assigned in ``__init__``. ``Node``/
+``Relation.__init__`` already set an attribute for every kwarg the
+caller actually passes; a generated subclass that instead did
+``self.name = kwargs.get("name", <default>)`` would invent that
+attribute even when the caller omitted it, which corrupts a backend
+``insertNode(..., update=True)``/``insertRelation(..., update=True)``
+partial merge by overwriting the field's real stored value with the
+placeholder default. Bare annotations give IDEs/type checkers the same
+attribute information without that runtime side effect.
 """
 
 from __future__ import annotations
@@ -62,6 +75,32 @@ from typing import Any, Dict, List, Optional
 # third-party RDF/OWL ontology) must not be able to smuggle arbitrary
 # code through these positions.
 _IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+# Schema property "type" strings (as produced by GraphStore._python_type /
+# schema_yaml) mapped to Python type-hint source. Used only for *static*
+# class-level annotations (`prop: str`) — never as a runtime default value.
+# A runtime default here would be a real property value, and any generated
+# `__init__` that unconditionally sets it (even when the caller omitted the
+# kwarg) would corrupt a backend `insertNode(..., update=True)` partial
+# merge by overwriting the field's existing value with this placeholder.
+_TYPE_HINTS = {
+    "string": "str",
+    "integer": "int",
+    "float": "float",
+    "boolean": "bool",
+    "array": "List[Any]",
+    "object": "Dict[str, Any]",
+    "null": "Any",
+}
+
+
+def _type_hint(schema_type: str) -> str:
+    """Map a schema property type string to a Python type-hint string.
+
+    Unknown/unmapped schema types fall back to ``Any`` rather than raising,
+    since the type string only drives a documentation-only annotation.
+    """
+    return _TYPE_HINTS.get(schema_type, "Any")
 
 
 def _validate_identifier(name: str, kind: str) -> str:
@@ -208,6 +247,24 @@ def generate_file(
 # ---------------------------------------------------------------------------
 
 
+def _generate_type_annotations(props: Dict[str, str]) -> str:
+    """Emit class-level type annotations for schema properties.
+
+    Bare annotations (``prop_name: Optional[str]``, no ``= ...``) only
+    populate ``__annotations__`` for static type checkers/IDEs — they
+    never touch the instance ``__dict__``. This is deliberate: unlike an
+    assignment in ``__init__``, it cannot invent an attribute the caller
+    didn't pass, so it can never corrupt a backend `insertNode(...,
+    update=True)` partial merge (see `_type_hint`).
+    """
+    lines: List[str] = []
+    for prop_name in sorted(props):
+        _validate_identifier(prop_name, "property name")
+        lines.append(f"    {prop_name}: Optional[{_type_hint(props[prop_name])}]")
+    lines.append("")
+    return "\n".join(lines)
+
+
 def _generate_node_class(
     class_name: str,
     label: str,
@@ -221,6 +278,7 @@ def _generate_node_class(
     lines.append(f"class {class_name}(Node):")
     lines.append(f"    {doc + '.'!r}")
     lines.append("")
+    lines.append(_generate_type_annotations(props))
 
     # pk is optional when no primary_key defined
     pk_type = "Dict[str, Any]" if primary_key else "Optional[Dict[str, Any]]"
@@ -242,11 +300,6 @@ def _generate_node_class(
     init_kwargs = [f"pk=pk", f"main_label={label!r}"]
     lines.append("        super().__init__(" + ", ".join(init_kwargs) + ", **kwargs)")
 
-    # Set properties
-    for prop_name in sorted(props):
-        _validate_identifier(prop_name, "property name")
-        lines.append(f"        self.{prop_name} = kwargs.get({prop_name!r}, {props[prop_name]!r})")
-
     return "\n".join(lines)
 
 
@@ -265,6 +318,7 @@ def _generate_weaknode_class(
     lines.append(f"class {class_name}(WeakNode):")
     lines.append(f"    {doc + '.'!r}")
     lines.append("")
+    lines.append(_generate_type_annotations(props))
     lines.append(f"    def __init__(self, parent: Node, **kwargs: Any) -> None:")
     init_doc = (
         f"Initialize a {class_name} weak node.\n\n"
@@ -280,11 +334,6 @@ def _generate_weaknode_class(
         init_kwargs.append(f"parent_relation={parent_relation!r}")
     lines.append("        super().__init__(" + ", ".join(init_kwargs) + ", **kwargs)")
 
-    # Set properties
-    for prop_name in sorted(props):
-        _validate_identifier(prop_name, "property name")
-        lines.append(f"        self.{prop_name} = kwargs.get({prop_name!r}, {props[prop_name]!r})")
-
     return "\n".join(lines)
 
 
@@ -299,6 +348,7 @@ def _generate_relation_class(
     lines.append(f"class {class_name}(Relation):")
     lines.append(f"    'Auto-generated relation class.'")
     lines.append("")
+    lines.append(_generate_type_annotations(props))
     lines.append(f"    def __init__(self, src: Node, dst: Node, **kwargs: Any) -> None:")
     init_doc = (
         f"Initialize a {class_name} relation.\n\n"
@@ -311,11 +361,6 @@ def _generate_relation_class(
 
     init_kwargs = [f"src=src", f"dst=dst", f"rel_type={rel_type!r}"]
     lines.append("        super().__init__(" + ", ".join(init_kwargs) + ", **kwargs)")
-
-    # Set properties
-    for prop_name in sorted(props):
-        _validate_identifier(prop_name, "property name")
-        lines.append(f"        self.{prop_name} = kwargs.get({prop_name!r}, {props[prop_name]!r})")
 
     return "\n".join(lines)
 
