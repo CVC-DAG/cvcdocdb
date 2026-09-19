@@ -81,6 +81,26 @@ class CloseDoesNotClobberConcurrentWritesTest(unittest.TestCase):
 
         self.assertTrue(page["properties"].get("is_weak"))
 
+    def test_create_group_weak_init_done_flag_is_still_persisted(self) -> None:
+        """create_group() sets `_weak_init_done` on the strong node *after*
+        the last insertNode/insertRelation call that would otherwise persist
+        it — it doesn't call _save_state() itself. Verify this flag still
+        survives close()+reopen now that close() no longer saves
+        unconditionally."""
+        from cvcdocdb.base import WeakNode
+
+        graph = NetworkXGraph(persistence_path=self.path)
+        strong = Node(pk={"id": "1"}, main_label="Doc")
+        weak = WeakNode(pk={"n": 1}, main_label="Page", parent=strong, parent_relation="HAS_PAGE")
+        graph.create_group(strong, weak_nodes=[weak])
+        graph.close()
+
+        reopened = NetworkXGraph(persistence_path=self.path)
+        doc = reopened.query({"main_label": "Doc"})[0]
+        reopened.close()
+
+        self.assertTrue(doc["properties"].get("_weak_init_done"))
+
 
 if __name__ == "__main__":
     unittest.main()
