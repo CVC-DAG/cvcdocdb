@@ -5,6 +5,50 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Cross-process write locking for `NetworkXGraph`** — every mutating method
+  (`insertNode`/`insertRelation`/`deleteNode`/`create_group`/
+  `init_propagation`/`enable_vector_index`) now runs its load-mutate-save
+  cycle inside `_guarded_write()`, a reentrant context manager built on a
+  `filelock.FileLock` (new dependency) next to the persistence file. On the
+  *outermost* call it acquires the cross-process lock, reloads the latest
+  on-disk state, lets the mutation run, and saves before releasing.
+  Without this, two `NetworkXGraph` instances (in one process or several)
+  pointing at the same `persistence_path` each hold an independent
+  in-memory copy: whichever saves last silently drops any change the other
+  already persisted — a lost update the previous `close()` fix (below)
+  did not address, since it only stopped a purely-reading instance from
+  clobbering a writer on close. Reloading immediately before every
+  mutation, under a held lock, closes the "two writers" case too. Nested
+  calls from the same top-level mutation (`create_group()` calling
+  `insertNode()`/`insertRelation()`, `deleteNode()`'s cascade recursion)
+  detect the lock is already held and skip the reload/save, so a group of
+  changes still reaches disk as a single atomic write, and a failed
+  multi-step operation leaves the on-disk state untouched rather than
+  partially written. See `test/test_networkx_concurrent_writes.py`.
+
+### Fixed
+
+- **`NetworkXGraph.close()` unconditionally re-saved the whole persistence
+  file** — even for an instance that only ever did reads. Every mutating
+  method (`insertNode`/`insertRelation`/`deleteNode`/`enable_vector_index`)
+  already persists synchronously right after it mutates, so `close()`'s
+  own save was always redundant for a mutator and actively harmful for a
+  read-only instance: two overlapping opens of the same path (e.g. a slow
+  read in one process/request and a write in another) would race, and
+  whichever instance closed *last* — even if it never wrote anything —
+  silently overwrote the other's changes with its own (possibly stale)
+  load-time snapshot. Found integrating this into a downstream app: 48
+  real nodes were reduced to 1 after nothing but read-only queries ran
+  concurrently with a write. `close()` no longer saves at all;
+  `init_propagation()` (the one mutator that didn't already persist
+  inline) now does so explicitly. Added
+  `test/test_close_no_unconditional_save.py`, which reproduces the exact
+  data-loss scenario and fails without the fix.
+
 ## [1.0.0a3] - 2026-09-19
 
 ### Security
