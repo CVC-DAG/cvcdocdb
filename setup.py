@@ -7,7 +7,7 @@ DESCR = "Graph-based document representation library with Neo4j and NetworkX bac
 URL = "https://github.com/CVC-DAG/cvcdocdb"
 AUTHOR = "Oriol Ramos Terrades"
 EMAIL = "oriolrt@cvc.uab.cat"
-LICENSE = "MIT"
+LICENSE = "GPL-3.0-or-later"
 
 PACKAGES = find_packages(exclude=["test", "test.*"])
 
@@ -50,7 +50,7 @@ setup(
     classifiers=[
         "Development Status :: 4 - Beta",
         "Intended Audience :: Developers",
-        "License :: OSI Approved :: MIT License",
+        "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
         "Programming Language :: Python :: 3",
         "Programming Language :: Python :: 3.9",
         "Programming Language :: Python :: 3.10",
