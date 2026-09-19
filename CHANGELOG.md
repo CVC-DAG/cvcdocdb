@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0a3] - 2026-09-19
+
+### Security
+
+- **Complete label validation in `neo4j_graph.py`'s `insertNode`** — the
+  1.0.0a2 fix only validated `main_label`; `alternative_labels` and
+  dependency nodes (inserted via the internal `_insertNode` path) were
+  not checked and could still inject Cypher through the node's label
+  list. Validation now runs inside `_insertNode` itself, covering every
+  path that reaches it.
+- **Parameterized Cypher in the RiC-O/NAF example loader** — `cvcdocdb.exemples.load_ric_o_naf`
+  built Cypher via raw string interpolation of node/relationship ids and
+  property values extracted from RDF/XML downloaded from GitHub,
+  bypassing the validators added in 1.0.0a2. Now uses `Neo4jGraph.query()`'s
+  `params` argument instead of splicing untrusted values into query text.
+
 ## [1.0.0a2] - 2026-09-18
 
 ### Security

@@ -1136,6 +1136,15 @@ class Neo4jGraph:
         update: bool = False,
         replace: bool = False,
     ) -> int:
+        # Validate every label (main_label + alternative_labels), not just
+        # main_label — _create_node/_update_node splice the full label list
+        # into the Cypher CREATE/MERGE text. This also covers nodes reached
+        # via the dependencies mechanism, which calls _insertNode directly
+        # and would otherwise bypass insertNode()'s own check.
+        for lbl in node.labels:
+            if lbl:
+                _validate_cypher_identifier(lbl, "label")
+
         node.version = self._version
 
         # check if node is weak if so, check if  its  parent node is already inserted. If no, raise an exception and cancel the transaction
