@@ -9,6 +9,66 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`NetworkXGraph.close()` unconditionally re-saved the whole persistence
+  file** — even for an instance that only ever did reads. Every mutating
+  method (`insertNode`/`insertRelation`/`deleteNode`/`enable_vector_index`)
+  already persists synchronously right after it mutates, so `close()`'s
+  own save was always redundant for a mutator and actively harmful for a
+  read-only instance: two overlapping opens of the same path (e.g. a slow
+  read in one process/request and a write in another) would race, and
+  whichever instance closed *last* — even if it never wrote anything —
+  silently overwrote the other's changes with its own (possibly stale)
+  load-time snapshot. Found integrating this into a downstream app: 48
+  real nodes were reduced to 1 after nothing but read-only queries ran
+  concurrently with a write. `close()` no longer saves at all;
+  `init_propagation()` (the one mutator that didn't already persist
+  inline) now does so explicitly. Added
+  `test/test_close_no_unconditional_save.py`, which reproduces the exact
+  data-loss scenario and fails without the fix.
+
+## [1.0.0a3] - 2026-09-19
+
+### Security
+
+- **Complete label validation in `neo4j_graph.py`'s `insertNode`** — the
+  1.0.0a2 fix only validated `main_label`; `alternative_labels` and
+  dependency nodes (inserted via the internal `_insertNode` path) were
+  not checked and could still inject Cypher through the node's label
+  list. Validation now runs inside `_insertNode` itself, covering every
+  path that reaches it.
+- **Parameterized Cypher in the RiC-O/NAF example loader** — `cvcdocdb.exemples.load_ric_o_naf`
+  built Cypher via raw string interpolation of node/relationship ids and
+  property values extracted from RDF/XML downloaded from GitHub,
+  bypassing the validators added in 1.0.0a2. Now uses `Neo4jGraph.query()`'s
+  `params` argument instead of splicing untrusted values into query text.
+
+## [1.0.0a2] - 2026-09-18
+
+### Security
+
+- **Code-injection prevention in `schema_gen.py`** — untrusted, ontology-derived
+  strings (class names, property names, `rdfs:comment` docstrings) are now
+  validated as safe Python identifiers or escaped with `repr()` before being
+  spliced into generated entity-class source, closing an arbitrary-code-execution
+  path via a crafted RDF/OWL ontology.
+- **Cypher-injection prevention in `neo4j_graph.py`** — `pk` values, node
+  labels, and relation types are now escaped/validated before being
+  interpolated into `WHERE`/`MERGE`/`MATCH` clauses.
+- **Hardened default pickle persistence path in `networkx_graph.py`** —
+  `NetworkXGraph()`'s default persistence file now lives in a per-user,
+  permission-restricted cache directory instead of the shared system temp
+  dir, and refuses to unpickle a file it doesn't own.
+
+### Fixed
+
+- **`Node.__getitem__`/`__setitem__`** — custom attributes set via kwargs
+  are now readable through the dict-like interface, and `node["pk"] = ...`
+  no longer raises `KeyError`.
+- **`_mergePK`** — no longer mutates the caller's own `pk` dict in place.
+>>>>>>> 93c1936 (fix: stop NetworkXGraph.close() from clobbering concurrent writes)
+
+### Fixed
+
 - **`schema_gen.py` generated classes corrupted partial `insertNode`/`insertRelation`
   merges** — every generated `Node`/`Relation`/`WeakNode` subclass unconditionally
   assigned `self.<prop> = kwargs.get("<prop>", "<type-name>")` for every schema
