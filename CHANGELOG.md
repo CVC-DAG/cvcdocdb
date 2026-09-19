@@ -88,7 +88,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   are now readable through the dict-like interface, and `node["pk"] = ...`
   no longer raises `KeyError`.
 - **`_mergePK`** — no longer mutates the caller's own `pk` dict in place.
->>>>>>> 93c1936 (fix: stop NetworkXGraph.close() from clobbering concurrent writes)
 
 ### Fixed
 
@@ -158,6 +157,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   actual distribution name. Older changelog entries below still reference
   `drm/...` paths as they existed at the time; they are left as a historical
   record rather than rewritten.
+- **Test suite reorganized** — unit tests misclassified inside
+  `test_drm.py` moved to `test_node.py`/`test_relation.py`; `slow` (Neo4j)
+  tests now auto-skip with a clear reason when no server is reachable
+  instead of failing on connection timeouts.
+- **README restructured** — general "Document Representation Models"
+  introduction added before the CVCDocDB-specific section.
+
+## [1.1.0] - 2026-07-13
+
+### Added
+
+- **NetworkX MERGE support** — Full MERGE clause in Cypher executor: node patterns `(n:Label {props})` and edge patterns `(a)-[r:REL]->(b)` with binding resolution from preceding MATCH clauses.
+- **NetworkX SET clause fix** — Now handles backtick-quoted properties (`n.\`prop\``) and space-separated multiple assignments.
+- **NetworkX MATCH binding fusion** — Multiple MATCH clauses correctly merge bindings via cross-product instead of replacing.
+- **RiC-O loader rewrite** — `load_ric_o_naf.py` uses Cypher MERGE instead of CSV import, with proper GitHub API directory listing and exponential backoff retries.
+- **Security** — Real Neo4j passwords removed from notebooks, `.env.example`, and test files.
+
+### Fixed
+
+- **Sphinx warnings** — Added `rdf_schema.rst` and `schema_gen.rst` to toctree; added `:no-index:` for duplicate `DocumentCultural.document_class`.
+- **NetworkX edge MERGE regex** — Fixed pattern to correctly match `(a)-[r:REL]->(b)` format.
 
 ## [1.1.0a3] - 2026-07-11
 
