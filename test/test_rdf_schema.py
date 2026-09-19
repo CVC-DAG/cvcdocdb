@@ -297,11 +297,13 @@ class GenerateClassesFromRDFTest(unittest.TestCase):
         self.assertIn("from cvcdocdb.base import Node, WeakNode, Relation, WeakRelation", source)
 
     def test_node_has_properties(self) -> None:
-        """Node class has property attributes."""
+        """Node class has type-annotated property attributes (bare
+        annotations, never assigned in __init__ — see schema_gen's
+        module docstring for why)."""
         yaml_str = rdf_to_yaml(self.ontology_path, "test", ontology_ns="http://example.org/")
         source = generate_classes(yaml_str)
-        self.assertIn("self.house = ", source)
-        self.assertIn("self.name = ", source)
+        self.assertIn("house: Optional[str]", source)
+        self.assertIn("name: Optional[str]", source)
 
     def test_weaknode_has_parent(self) -> None:
         """WeakNode class sets parent and parent_relation."""
