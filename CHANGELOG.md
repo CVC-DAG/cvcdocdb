@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **`NetworkXGraph.close()` unconditionally re-saved the whole persistence
+  file** — even for an instance that only ever did reads. Every mutating
+  method (`insertNode`/`insertRelation`/`deleteNode`/`enable_vector_index`)
+  already persists synchronously right after it mutates, so `close()`'s
+  own save was always redundant for a mutator and actively harmful for a
+  read-only instance: two overlapping opens of the same path (e.g. a slow
+  read in one process/request and a write in another) would race, and
+  whichever instance closed *last* — even if it never wrote anything —
+  silently overwrote the other's changes with its own (possibly stale)
+  load-time snapshot. Found integrating this into a downstream app: 48
+  real nodes were reduced to 1 after nothing but read-only queries ran
+  concurrently with a write. `close()` no longer saves at all;
+  `init_propagation()` (the one mutator that didn't already persist
+  inline) now does so explicitly. Added
+  `test/test_close_no_unconditional_save.py`, which reproduces the exact
+  data-loss scenario and fails without the fix.
+
 ## [1.0.0a3] - 2026-09-19
 
 ### Security

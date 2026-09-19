@@ -934,6 +934,11 @@ class NetworkXGraph(GraphStore):
                 if progress_callback and (idx % 100 == 0 or idx == total - 1):
                     progress_callback(idx + 1, total)
 
+            # Persist here, not in close(): close() no longer saves
+            # unconditionally (see its docstring), so a mutating method must
+            # persist its own changes when it makes any.
+            self._save_state()
+
         if background:
             thread = threading.Thread(target=_run, daemon=True)
             thread.start()
@@ -949,9 +954,22 @@ class NetworkXGraph(GraphStore):
     def close(self) -> None:
         """Release resources and clear the graph.
 
-        Persists the current graph state and clears in-memory data.
+        Does NOT persist anything itself — every mutating method
+        (``insertNode``/``insertRelation``/``deleteNode``/`init_propagation``/
+        ``enable_vector_index``) already calls ``_save_state()`` synchronously
+        as soon as it mutates, so by the time ``close()`` runs the on-disk
+        state already reflects every change made through this instance.
+
+        This used to call ``_save_state()`` unconditionally, which re-wrote
+        the *entire* file with whatever was loaded into memory when this
+        instance was opened — including for an instance that only ever did
+        reads. Two overlapping opens of the same persistence path (e.g. a
+        slow read in one process/request and a write in another) would race:
+        whichever instance closed last silently overwrote the other's writes
+        with its own (possibly stale) snapshot, even though it never mutated
+        anything itself. Removing the call here means a read-only instance
+        can never clobber someone else's concurrent write on close.
         """
-        self._save_state()
         self._graph.clear()
         self._node_attrs.clear()
         self._edge_attrs.clear()
