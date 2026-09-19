@@ -1036,6 +1036,60 @@ class NetworkXGraph(GraphStore):
             )
             self._rebuild_vector_index(property_name)
 
+    def get_subdocuments(self, strong_node: Node) -> List[Dict[str, Any]]:
+        """Return all subdocuments (WeakNodes) reachable from *strong_node*
+        through ``_propagate`` edges.
+
+        Follows edges in their declared direction (parent → child) and
+        returns every descendant WeakNode as a dict with ``label``, ``pk``,
+        and ``properties`` keys.
+
+        Args:
+            strong_node: The root (non-weak) node.
+
+        Returns:
+            A list of dicts, one per subdocument.
+        """
+        if strong_node._primary_key is None:
+            return []
+
+        # Find the strong node's internal id
+        strong_id = self.checkNode(strong_node)
+        if strong_id is None:
+            return []
+
+        # BFS from strong node, following only edges with _propagate=True
+        subdocuments: List[Dict[str, Any]] = []
+        seen_ids: set = {strong_id}
+
+        queue: List[int] = [strong_id]
+        while queue:
+            current_id = queue.pop(0)
+            # Iterate over outgoing edges with data and keys (MultiDiGraph)
+            for _, neighbor, edge_key, edge_data in self._graph.edges(current_id, data=True, keys=True):
+                if neighbor in seen_ids:
+                    continue
+                edge_attrs = self.get_edge_attrs(current_id, neighbor, edge_data.get("rel_type", edge_key))
+                if edge_attrs and edge_attrs.get("_propagate") is True:
+                    seen_ids.add(neighbor)
+                    node_attrs = self.get_node_attrs(neighbor)
+                    if node_attrs is None:
+                        continue
+                    label = node_attrs.get("main_label", "?")
+                    props = {k: v for k, v in node_attrs.items() if not k.startswith("_")}
+                    business_pk = {
+                        k: v for k, v in props.items()
+                        if not k.startswith("_") and k not in ("neo4j_id", "is_weak")
+                    }
+                    subdocuments.append({
+                        "label": label,
+                        "pk": business_pk,
+                        "properties": props,
+                    })
+                    queue.append(neighbor)
+
+        return subdocuments
+
     def query_vector_index(
         self,
         property_name: str,
