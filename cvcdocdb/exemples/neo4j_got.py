@@ -10,6 +10,7 @@ import urllib.request
 from typing import Dict, List
 
 from cvcdocdb.base import Node, Relation
+from cvcdocdb.exemples._http import read_capped
 
 
 THRONES_CHARACTERS_URL = "https://thronesapi.com/api/v2/Characters"
@@ -25,7 +26,7 @@ def _download_characters(limit: int = 60) -> List[dict]:
     req = urllib.request.Request(THRONES_CHARACTERS_URL, headers={"User-Agent": "cvcdocdb-examples/1.0"})
     try:
         with urllib.request.urlopen(req, timeout=20) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
+            data = json.loads(read_capped(resp, url=THRONES_CHARACTERS_URL).decode("utf-8"))
         if isinstance(data, list):
             return data[:limit]
     except Exception:
