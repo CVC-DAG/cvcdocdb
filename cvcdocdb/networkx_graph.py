@@ -844,6 +844,12 @@ class NetworkXGraph(GraphStore):
             self._node_attrs[strong_id] = strong_attrs
             self._graph.nodes[strong_id]["_weak_init_done"] = True
 
+            # This mutation happens after the last insertNode/insertRelation
+            # call that would otherwise have persisted it — close() no
+            # longer saves unconditionally, so it must be saved explicitly
+            # here (same reasoning as init_propagation()'s own save).
+            self._save_state()
+
             return strong_id
 
         except Exception:
@@ -955,10 +961,11 @@ class NetworkXGraph(GraphStore):
         """Release resources and clear the graph.
 
         Does NOT persist anything itself — every mutating method
-        (``insertNode``/``insertRelation``/``deleteNode``/`init_propagation``/
-        ``enable_vector_index``) already calls ``_save_state()`` synchronously
-        as soon as it mutates, so by the time ``close()`` runs the on-disk
-        state already reflects every change made through this instance.
+        (``insertNode``/``insertRelation``/``deleteNode``/``init_propagation``/
+        ``create_group``/``enable_vector_index``) already calls
+        ``_save_state()`` synchronously as soon as it mutates, so by the time
+        ``close()`` runs the on-disk state already reflects every change
+        made through this instance.
 
         This used to call ``_save_state()`` unconditionally, which re-wrote
         the *entire* file with whatever was loaded into memory when this
