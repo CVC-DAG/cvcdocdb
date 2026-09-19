@@ -284,6 +284,25 @@ class Node:
     def __contains__(self, key: str) -> bool:
         return key in self.__dict__ or "_" + key in self.__dict__
 
+    def get(self, key: str, default: Any = None) -> Any:
+        """Dict-like access: return the value for *key*, or *default* if missing.
+
+        This method provides a compatibility shim so that code written
+        with ``node.get("key", default)`` works on Node objects even
+        though they are not full ``dict`` subclasses.
+
+        Args:
+            key: The attribute key to retrieve.
+            default: Value returned when the key is not found.
+
+        Returns:
+            The attribute value, or *default* if the key is absent.
+        """
+        try:
+            return self[key]
+        except Exception:
+            return default
+
     # ------------------------------------------------------------------
     # Properties
     # ------------------------------------------------------------------
