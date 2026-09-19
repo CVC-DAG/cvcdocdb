@@ -7,7 +7,8 @@ import os
 import pickle
 import tempfile
 import threading
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
+from contextlib import contextmanager
+from typing import Any, Callable, Dict, Iterator, List, Optional, Set, Tuple, Union
 
 import numpy as np
 import networkx as nx
@@ -16,6 +17,11 @@ try:
     import hnswlib
 except ImportError:  # pragma: no cover - guarded at runtime in vector APIs
     hnswlib = None
+
+try:
+    from filelock import FileLock
+except ImportError:  # pragma: no cover - guarded at runtime in __init__
+    FileLock = None
 
 from .base import Node, Relation, WeakRelation
 from .graph_store import GraphStore
@@ -43,6 +49,17 @@ class NetworkXGraph(GraphStore):
         self._vector_indexes: Dict[str, Any] = {}
         self._vector_index_meta: Dict[str, Dict[str, Any]] = {}
         self._persistence_path = persistence_path or self._default_persistence_path()
+        if FileLock is None:
+            raise ImportError(
+                "filelock is required for NetworkXGraph's cross-process write "
+                "locking. Install it with: pip install filelock"
+            )
+        # Cross-process lock guarding the load-mutate-save cycle of every
+        # mutating call (see _guarded_write). A single lock file next to
+        # the persistence file, so two NetworkXGraph instances (in the
+        # same process or different ones) pointing at the same
+        # persistence_path never race on it.
+        self._file_lock = FileLock(f"{self._persistence_path}.lock")
         self._load_state()
         # Internal tracking: node_id -> pk dict (for get_node_pks)
         self._node_pks: Dict[int, Dict[str, Any]] = {}
@@ -66,37 +83,37 @@ class NetworkXGraph(GraphStore):
 
         Returns the internal node id assigned by the graph.
         """
-        # Handle parent insertion for weak nodes
-        if node["is_weak"] and insert_parent and node["parent"] is not None:
-            parent = node["parent"]
-            parent_id: int = self._ensure_node_inserted(parent, update=True, replace=False)
-            parent.neo4j_id = parent_id
+        with self._guarded_write():
+            # Handle parent insertion for weak nodes
+            if node["is_weak"] and insert_parent and node["parent"] is not None:
+                parent = node["parent"]
+                parent_id: int = self._ensure_node_inserted(parent, update=True, replace=False)
+                parent.neo4j_id = parent_id
 
-        node_id = self._ensure_node_inserted(node, update=update, replace=replace)
-        node.neo4j_id = node_id
+            node_id = self._ensure_node_inserted(node, update=update, replace=replace)
+            node.neo4j_id = node_id
 
-        # Track node_id -> pk mapping for get_node_pks()
-        if node._primary_key is not None:
-            self._node_pks[node_id] = dict(node._primary_key)
+            # Track node_id -> pk mapping for get_node_pks()
+            if node._primary_key is not None:
+                self._node_pks[node_id] = dict(node._primary_key)
 
-        # If weak, create the parent relation with _propagate=True
-        if node["is_weak"] and node["parent"] is not None:
-            parent_id = node["parent"].neo4j_id
-            self._graph.add_edge(parent_id, node_id, key=node["parent_relation"], rel_type=node["parent_relation"])
-            self._edge_attrs[(parent_id, node_id, node["parent_relation"])] = {"_propagate": True}
-            # Register parent-child edge in FK index (like Neo4jGraph)
-            self._add_to_fk_index(parent_id, node_id, node["parent_relation"])
+            # If weak, create the parent relation with _propagate=True
+            if node["is_weak"] and node["parent"] is not None:
+                parent_id = node["parent"].neo4j_id
+                self._graph.add_edge(parent_id, node_id, key=node["parent_relation"], rel_type=node["parent_relation"])
+                self._edge_attrs[(parent_id, node_id, node["parent_relation"])] = {"_propagate": True}
+                # Register parent-child edge in FK index (like Neo4jGraph)
+                self._add_to_fk_index(parent_id, node_id, node["parent_relation"])
 
-        # Handle dependencies: create Valor nodes and HAS_* edges
-        deps = getattr(node, "_dependencies", None)
-        if deps:
-            for k in deps.keys():
-                v = deps[k]
-                id_v = self._ensure_node_inserted(v, update=True, replace=False)
-                v.neo4j_id = id_v
-                self.insertRelation(Relation(node, v, k.upper()), update=True)
+            # Handle dependencies: create Valor nodes and HAS_* edges
+            deps = getattr(node, "_dependencies", None)
+            if deps:
+                for k in deps.keys():
+                    v = deps[k]
+                    id_v = self._ensure_node_inserted(v, update=True, replace=False)
+                    v.neo4j_id = id_v
+                    self.insertRelation(Relation(node, v, k.upper()), update=True)
 
-        self._save_state()
         return node_id
 
     def insertRelation(
@@ -120,57 +137,56 @@ class NetworkXGraph(GraphStore):
 
         Returns the internal edge identifier (u, v, key).
         """
-        # Resolve src/dst ids: prefer neo4j_id, fall back to pk lookup
-        src_id = self._resolve_node_id(rel["src"])
-        dst_id = self._resolve_node_id(rel["dst"])
+        with self._guarded_write():
+            # Resolve src/dst ids: prefer neo4j_id, fall back to pk lookup
+            src_id = self._resolve_node_id(rel["src"])
+            dst_id = self._resolve_node_id(rel["dst"])
 
-        if src_id is None or dst_id is None:
-            missing = []
-            if src_id is None:
-                src_pk = rel["src"].get("pk", "?")
-                src_label = rel["src"].get("main_label", "?")
-                missing.append(f"src(pk={src_pk}, label={src_label})")
-            if dst_id is None:
-                dst_pk = rel["dst"].get("pk", "?")
-                dst_label = rel["dst"].get("main_label", "?")
-                missing.append(f"dst(pk={dst_pk}, label={dst_label})")
-            raise RuntimeError(
-                f"FK violation: node(s) not found: {', '.join(missing)}. "
-                f"Insert them before creating the relation."
-            )
-
-        edge_key = rel["type"]
-        exists = self._graph.has_edge(src_id, dst_id, key=edge_key)
-
-        if exists:
-            if replace:
-                # Delete existing relation and create fresh
-                self._graph.remove_edge(src_id, dst_id, key=edge_key)
-                if (src_id, dst_id, edge_key) in self._edge_attrs:
-                    del self._edge_attrs[(src_id, dst_id, edge_key)]
-                self._remove_from_fk_index(src_id, dst_id, edge_key)
-            elif update:
-                # MERGE + SET: update attributes of existing relation
-                attrs = rel["attributes"] if rel["attributes"] is not None else {}
-                self._edge_attrs[(src_id, dst_id, edge_key)].update(attrs)
-                self._save_state()
-                return (src_id, dst_id, edge_key)
-            else:
-                # Duplicate key — same as Neo4j ConstraintError
+            if src_id is None or dst_id is None:
+                missing = []
+                if src_id is None:
+                    src_pk = rel["src"].get("pk", "?")
+                    src_label = rel["src"].get("main_label", "?")
+                    missing.append(f"src(pk={src_pk}, label={src_label})")
+                if dst_id is None:
+                    dst_pk = rel["dst"].get("pk", "?")
+                    dst_label = rel["dst"].get("main_label", "?")
+                    missing.append(f"dst(pk={dst_pk}, label={dst_label})")
                 raise RuntimeError(
-                    f"Duplicate relation: ({src_id})-[{edge_key}]->({dst_id}) "
-                    f"already exists. Use replace=True to overwrite or "
-                    f"update=True to merge attributes."
+                    f"FK violation: node(s) not found: {', '.join(missing)}. "
+                    f"Insert them before creating the relation."
                 )
 
-        # Create new relation
-        self._graph.add_edge(src_id, dst_id, key=edge_key, rel_type=rel["type"])
-        attrs = rel["attributes"] if rel["attributes"] is not None else {}
-        self._edge_attrs[(src_id, dst_id, edge_key)] = attrs
-        self._add_to_fk_index(src_id, dst_id, edge_key)
+            edge_key = rel["type"]
+            exists = self._graph.has_edge(src_id, dst_id, key=edge_key)
 
-        self._save_state()
-        return (src_id, dst_id, edge_key)
+            if exists:
+                if replace:
+                    # Delete existing relation and create fresh
+                    self._graph.remove_edge(src_id, dst_id, key=edge_key)
+                    if (src_id, dst_id, edge_key) in self._edge_attrs:
+                        del self._edge_attrs[(src_id, dst_id, edge_key)]
+                    self._remove_from_fk_index(src_id, dst_id, edge_key)
+                elif update:
+                    # MERGE + SET: update attributes of existing relation
+                    attrs = rel["attributes"] if rel["attributes"] is not None else {}
+                    self._edge_attrs[(src_id, dst_id, edge_key)].update(attrs)
+                    return (src_id, dst_id, edge_key)
+                else:
+                    # Duplicate key — same as Neo4j ConstraintError
+                    raise RuntimeError(
+                        f"Duplicate relation: ({src_id})-[{edge_key}]->({dst_id}) "
+                        f"already exists. Use replace=True to overwrite or "
+                        f"update=True to merge attributes."
+                    )
+
+            # Create new relation
+            self._graph.add_edge(src_id, dst_id, key=edge_key, rel_type=rel["type"])
+            attrs = rel["attributes"] if rel["attributes"] is not None else {}
+            self._edge_attrs[(src_id, dst_id, edge_key)] = attrs
+            self._add_to_fk_index(src_id, dst_id, edge_key)
+
+            return (src_id, dst_id, edge_key)
 
     def deleteNode(
         self,
@@ -187,59 +203,58 @@ class NetworkXGraph(GraphStore):
         - ``"restrict"``: ON DELETE RESTRICT — refuse if edges exist
         - ``"set_null"``: ON DELETE SET NULL — delete node, keep neighbors
         """
-        node_id = node.neo4j_id
-        if node_id is None:
-            # Fall back to PK lookup
-            node_id = self.checkNode(node)
-        if node_id is None:
-            return False
+        with self._guarded_write():
+            node_id = node.neo4j_id
+            if node_id is None:
+                # Fall back to PK lookup
+                node_id = self.checkNode(node)
+            if node_id is None:
+                return False
 
-        if propagation:
-            # Delete all connected nodes that have _propagate=True
-            # Neo4j: MATCH (n)-[r]->(b) WHERE r._propagate=TRUE RETURN b
-            # Also check if the parent node itself has propagate enabled
-            parent_propagate = getattr(node, "_propagate", False)
-            # Iterate over a copy since deleteNode mutates the graph
-            neighbors = list(self._graph.successors(node_id))
-            for neighbor in neighbors:
-                edges_data = list(self._graph[node_id][neighbor].items())
-                for key, data in edges_data:
-                    edge_has_propagate = self._edge_attrs.get((node_id, neighbor, key), {}).get("_propagate")
-                    if edge_has_propagate or parent_propagate:
-                        child_node = Node(neo4j_id=neighbor)
-                        self.deleteNode(child_node, propagation=propagation, detach=True)
-                        # Stop iterating if node was deleted
-                        break
+            if propagation:
+                # Delete all connected nodes that have _propagate=True
+                # Neo4j: MATCH (n)-[r]->(b) WHERE r._propagate=TRUE RETURN b
+                # Also check if the parent node itself has propagate enabled
+                parent_propagate = getattr(node, "_propagate", False)
+                # Iterate over a copy since deleteNode mutates the graph
+                neighbors = list(self._graph.successors(node_id))
+                for neighbor in neighbors:
+                    edges_data = list(self._graph[node_id][neighbor].items())
+                    for key, data in edges_data:
+                        edge_has_propagate = self._edge_attrs.get((node_id, neighbor, key), {}).get("_propagate")
+                        if edge_has_propagate or parent_propagate:
+                            child_node = Node(neo4j_id=neighbor)
+                            self.deleteNode(child_node, propagation=propagation, detach=True)
+                            # Stop iterating if node was deleted
+                            break
 
-        if on_delete == "set_null":
-            # ON DELETE SET NULL: delete node, remove edges, keep neighbors
-            self._set_null_delete(node_id)
-            if self._graph.has_node(node_id):
+            if on_delete == "set_null":
+                # ON DELETE SET NULL: delete node, remove edges, keep neighbors
+                self._set_null_delete(node_id)
+                if self._graph.has_node(node_id):
+                    self._graph.remove_node(node_id)
+                return True
+
+            if detach:
+                # ON DELETE CASCADE: recursively delete connected edges and orphans
+                self._cascade_delete(node_id)
+                # Remove node from graph if it still exists
+                if self._graph.has_node(node_id):
+                    self._graph.remove_node(node_id)
+            else:
+                # ON DELETE RESTRICT: refuse to delete if edges exist
+                if self._graph.degree(node_id) > 0:
+                    raise RuntimeError(
+                        f"ON DELETE RESTRICT: node {node_id} has edges and "
+                        f"detach=False. Use detach=True or remove edges first."
+                    )
+                self._clean_fk_index(node_id)
+                old_attrs = self._node_attrs.pop(node_id, None)
+                if old_attrs is not None:
+                    self._deindex_node(node_id, old_attrs)
                 self._graph.remove_node(node_id)
-            self._save_state()
+
             return True
-
-        if detach:
-            # ON DELETE CASCADE: recursively delete connected edges and orphans
-            self._cascade_delete(node_id)
-            # Remove node from graph if it still exists
-            if self._graph.has_node(node_id):
-                self._graph.remove_node(node_id)
-        else:
-            # ON DELETE RESTRICT: refuse to delete if edges exist
-            if self._graph.degree(node_id) > 0:
-                raise RuntimeError(
-                    f"ON DELETE RESTRICT: node {node_id} has edges and "
-                    f"detach=False. Use detach=True or remove edges first."
-                )
-            self._clean_fk_index(node_id)
-            old_attrs = self._node_attrs.pop(node_id, None)
-            if old_attrs is not None:
-                self._deindex_node(node_id, old_attrs)
-            self._graph.remove_node(node_id)
-
-        self._save_state()
-        return True
 
     def checkNode(self, node: Node, **kwargs: Any) -> Optional[int]:
         """Check if a node exists in the graph.
@@ -819,43 +834,38 @@ class NetworkXGraph(GraphStore):
         Raises:
             RuntimeError: If any part of the group creation fails.
         """
-        # Snapshot current state for rollback on failure
-        snapshot = self._snapshot()
+        with self._guarded_write():
+            # Snapshot current state for rollback on failure
+            snapshot = self._snapshot()
 
-        try:
-            # 1. Insert the strong node
-            strong_id = self.insertNode(strong_node, insert_parent=False, update=False, replace=False)
+            try:
+                # 1. Insert the strong node
+                strong_id = self.insertNode(strong_node, insert_parent=False, update=False, replace=False)
 
-            # 2. Insert weak nodes (they reference the strong node as parent)
-            if weak_nodes:
-                for wn in weak_nodes:
-                    self.insertNode(wn, insert_parent=True, update=False, replace=False)
+                # 2. Insert weak nodes (they reference the strong node as parent)
+                if weak_nodes:
+                    for wn in weak_nodes:
+                        self.insertNode(wn, insert_parent=True, update=False, replace=False)
 
-            # 3. Insert weak relations
-            if weak_relations:
-                for wr in weak_relations:
-                    self.insertRelation(wr, update=False, replace=False)
+                # 3. Insert weak relations
+                if weak_relations:
+                    for wr in weak_relations:
+                        self.insertRelation(wr, update=False, replace=False)
 
-            # 4. Mark the strong node as having its weak children initialized.
-            #    The edges already carry _propagate=True from insertNode, so
-            #    init_propagation() will detect the weak nodes without issue.
-            strong_attrs = self._node_attrs.get(strong_id, {})
-            strong_attrs["_weak_init_done"] = True
-            self._node_attrs[strong_id] = strong_attrs
-            self._graph.nodes[strong_id]["_weak_init_done"] = True
+                # 4. Mark the strong node as having its weak children initialized.
+                #    The edges already carry _propagate=True from insertNode, so
+                #    init_propagation() will detect the weak nodes without issue.
+                strong_attrs = self._node_attrs.get(strong_id, {})
+                strong_attrs["_weak_init_done"] = True
+                self._node_attrs[strong_id] = strong_attrs
+                self._graph.nodes[strong_id]["_weak_init_done"] = True
 
-            # This mutation happens after the last insertNode/insertRelation
-            # call that would otherwise have persisted it — close() no
-            # longer saves unconditionally, so it must be saved explicitly
-            # here (same reasoning as init_propagation()'s own save).
-            self._save_state()
+                return strong_id
 
-            return strong_id
-
-        except Exception:
-            # Rollback: restore snapshot
-            self._restore(snapshot)
-            raise
+            except Exception:
+                # Rollback: restore snapshot
+                self._restore(snapshot)
+                raise
 
     def _get_group_nodes(self) -> Set[int]:
         """Return the set of node ids that belong to the current group
@@ -881,69 +891,65 @@ class NetworkXGraph(GraphStore):
             self._propagation_initialized = True
 
         def _run():
-            # Collect all node ids
-            all_ids = list(self._node_attrs.keys())
-            total = len(all_ids)
+            with self._guarded_write():
+                # Collect all node ids
+                all_ids = list(self._node_attrs.keys())
+                total = len(all_ids)
 
-            # First pass: identify weak nodes by scanning edges for _propagate
-            weak_node_ids: Set[int] = set()
-            node_parent_relation: Dict[int, str] = {}
+                # First pass: identify weak nodes by scanning edges for _propagate
+                weak_node_ids: Set[int] = set()
+                node_parent_relation: Dict[int, str] = {}
 
-            for (u, v, key), edge_attrs in self._edge_attrs.items():
-                if edge_attrs.get("_propagate"):
-                    weak_node_ids.add(v)
-                    node_parent_relation[v] = key
+                for (u, v, key), edge_attrs in self._edge_attrs.items():
+                    if edge_attrs.get("_propagate"):
+                        weak_node_ids.add(v)
+                        node_parent_relation[v] = key
 
-            # Second pass: set properties on nodes
-            for idx, nid in enumerate(all_ids):
-                attrs = self._node_attrs.get(nid, {})
+                # Second pass: set properties on nodes
+                for idx, nid in enumerate(all_ids):
+                    attrs = self._node_attrs.get(nid, {})
 
-                # Skip strong nodes whose weak children are already initialized.
-                # _weak_init_done=True means create_group() created this node
-                # together with its WeakNodes (edges carry _propagate=True).
-                if attrs.get("_weak_init_done"):
-                    continue
+                    # Skip strong nodes whose weak children are already initialized.
+                    # _weak_init_done=True means create_group() created this node
+                    # together with its WeakNodes (edges carry _propagate=True).
+                    if attrs.get("_weak_init_done"):
+                        continue
 
-                # Mark weak nodes
-                if nid in weak_node_ids:
-                    if "is_weak" not in attrs:
-                        attrs["is_weak"] = True
+                    # Mark weak nodes
+                    if nid in weak_node_ids:
+                        if "is_weak" not in attrs:
+                            attrs["is_weak"] = True
+                            self._node_attrs[nid] = attrs
+                            self._graph.nodes[nid]["is_weak"] = True
+
+                        # Also set _propagate flag on the node
+                        if "_propagate" not in attrs:
+                            attrs["_propagate"] = True
+                            self._node_attrs[nid] = attrs
+                            self._graph.nodes[nid]["_propagate"] = True
+
+                    # Set parent_relation on weak nodes
+                    if nid in node_parent_relation and "parent_relation" not in attrs:
+                        attrs["parent_relation"] = node_parent_relation[nid]
                         self._node_attrs[nid] = attrs
-                        self._graph.nodes[nid]["is_weak"] = True
+                        self._graph.nodes[nid]["parent_relation"] = node_parent_relation[nid]
 
-                    # Also set _propagate flag on the node
-                    if "_propagate" not in attrs:
-                        attrs["_propagate"] = True
+                    # Check for dependency edges (HAS_*)
+                    deps = {}
+                    for (u2, v2, key2), edge_attrs2 in self._edge_attrs.items():
+                        if u2 == nid and key2.startswith("HAS_"):
+                            deps[key2[4:].lower()] = {
+                                "main_label": self._node_attrs.get(v2, {}).get("main_label", ""),
+                                "pk": self._node_attrs.get(v2, {}).get("pk", {}),
+                            }
+                    if deps and "_dependencies" not in attrs:
+                        attrs["_dependencies"] = deps
                         self._node_attrs[nid] = attrs
-                        self._graph.nodes[nid]["_propagate"] = True
+                        self._graph.nodes[nid]["_dependencies"] = deps
 
-                # Set parent_relation on weak nodes
-                if nid in node_parent_relation and "parent_relation" not in attrs:
-                    attrs["parent_relation"] = node_parent_relation[nid]
-                    self._node_attrs[nid] = attrs
-                    self._graph.nodes[nid]["parent_relation"] = node_parent_relation[nid]
-
-                # Check for dependency edges (HAS_*)
-                deps = {}
-                for (u2, v2, key2), edge_attrs2 in self._edge_attrs.items():
-                    if u2 == nid and key2.startswith("HAS_"):
-                        deps[key2[4:].lower()] = {
-                            "main_label": self._node_attrs.get(v2, {}).get("main_label", ""),
-                            "pk": self._node_attrs.get(v2, {}).get("pk", {}),
-                        }
-                if deps and "_dependencies" not in attrs:
-                    attrs["_dependencies"] = deps
-                    self._node_attrs[nid] = attrs
-                    self._graph.nodes[nid]["_dependencies"] = deps
-
-                # Progress callback
-                if progress_callback and (idx % 100 == 0 or idx == total - 1):
-                    progress_callback(idx + 1, total)
-
-            # Persist here, not in close(): close() no longer saves
-            # unconditionally (see its docstring), so a mutating method must
-            # persist its own changes when it makes any.
-            self._save_state()
+                    # Progress callback
+                    if progress_callback and (idx % 100 == 0 or idx == total - 1):
+                        progress_callback(idx + 1, total)
 
         if background:
             thread = threading.Thread(target=_run, daemon=True)
@@ -962,10 +968,12 @@ class NetworkXGraph(GraphStore):
 
         Does NOT persist anything itself — every mutating method
         (``insertNode``/``insertRelation``/``deleteNode``/``init_propagation``/
-        ``create_group``/``enable_vector_index``) already calls
-        ``_save_state()`` synchronously as soon as it mutates, so by the time
+        ``create_group``/``enable_vector_index``) already reloads the latest
+        on-disk state and saves as part of a cross-process file-locked
+        load-mutate-save cycle (see ``_guarded_write``), so by the time
         ``close()`` runs the on-disk state already reflects every change
-        made through this instance.
+        made through this instance — including any other process's writes
+        that happened in between.
 
         This used to call ``_save_state()`` unconditionally, which re-wrote
         the *entire* file with whatever was loaded into memory when this
@@ -975,7 +983,10 @@ class NetworkXGraph(GraphStore):
         whichever instance closed last silently overwrote the other's writes
         with its own (possibly stale) snapshot, even though it never mutated
         anything itself. Removing the call here means a read-only instance
-        can never clobber someone else's concurrent write on close.
+        can never clobber someone else's concurrent write on close. The
+        remaining "two writers" race (both mutate, neither just reads) is
+        handled separately by ``_guarded_write``'s reload-before-mutate
+        under a cross-process lock.
         """
         self._graph.clear()
         self._node_attrs.clear()
@@ -1005,25 +1016,25 @@ class NetworkXGraph(GraphStore):
         if space not in ("cosine", "l2", "ip"):
             raise ValueError("space must be one of: cosine, l2, ip")
 
-        current_meta = self._vector_index_meta.get(property_name)
-        if current_meta is not None:
-            if current_meta["dimensions"] != dimensions or current_meta["space"] != space:
-                raise ValueError(
-                    f"vector index for '{property_name}' already exists with "
-                    f"space={current_meta['space']} dim={current_meta['dimensions']}"
-                )
-            return
+        with self._guarded_write():
+            current_meta = self._vector_index_meta.get(property_name)
+            if current_meta is not None:
+                if current_meta["dimensions"] != dimensions or current_meta["space"] != space:
+                    raise ValueError(
+                        f"vector index for '{property_name}' already exists with "
+                        f"space={current_meta['space']} dim={current_meta['dimensions']}"
+                    )
+                return
 
-        self._create_empty_vector_index(
-            property_name=property_name,
-            dimensions=dimensions,
-            space=space,
-            ef_construction=ef_construction,
-            m=m,
-            max_elements=max(1024, len(self._node_attrs) + 128),
-        )
-        self._rebuild_vector_index(property_name)
-        self._save_state()
+            self._create_empty_vector_index(
+                property_name=property_name,
+                dimensions=dimensions,
+                space=space,
+                ef_construction=ef_construction,
+                m=m,
+                max_elements=max(1024, len(self._node_attrs) + 128),
+            )
+            self._rebuild_vector_index(property_name)
 
     def query_vector_index(
         self,
@@ -1337,6 +1348,49 @@ class NetworkXGraph(GraphStore):
     # ------------------------------------------------------------------
     # Protected helpers: persistence
     # ------------------------------------------------------------------
+
+    @contextmanager
+    def _guarded_write(self) -> Iterator[None]:
+        """Serialize a load-mutate-save cycle across processes/instances.
+
+        Every public mutating method wraps its body in this context
+        manager instead of calling ``_save_state()`` directly. On the
+        *outermost* call it: acquires the cross-process file lock, reloads
+        the latest on-disk state (so the mutation is applied on top of
+        whatever another process already persisted, not a stale snapshot
+        from whenever this instance was constructed or last reloaded), lets
+        the body mutate, and saves before releasing the lock.
+
+        Without this, two ``NetworkXGraph`` instances (in one process or
+        several) pointing at the same ``persistence_path`` each hold an
+        independent in-memory copy: whichever one saves last silently wipes
+        out any change the other already persisted — a classic lost
+        update. Reloading under a held lock immediately before mutating
+        closes that window.
+
+        Reentrant by design: nested calls from the same top-level mutation
+        (``create_group()`` calling ``insertNode()``/``insertRelation()``,
+        or ``deleteNode()``'s cascade recursion) detect that the lock is
+        already held and skip the reload/save — only the outermost call
+        does it. This matters, not just as an optimization: a nested
+        reload would discard the outer call's own not-yet-saved mutations,
+        and a nested save would persist a group's changes as several
+        partial writes instead of one atomic one. On an exception, the
+        lock is still released (via ``finally``) but nothing is saved, so
+        a failed multi-step operation (e.g. ``create_group()``'s rollback)
+        leaves the on-disk state untouched rather than reflecting a
+        partial write.
+        """
+        is_outermost = not self._file_lock.is_locked
+        self._file_lock.acquire()
+        try:
+            if is_outermost:
+                self._load_state()
+            yield
+            if is_outermost:
+                self._save_state()
+        finally:
+            self._file_lock.release()
 
     def _default_persistence_path(self) -> str:
         """Build a deterministic persistence path for the current workspace.

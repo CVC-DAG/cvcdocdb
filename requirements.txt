@@ -1,5 +1,6 @@
 traitlets
 networkx
+filelock
 matplotlib
 numpy
 neo4j

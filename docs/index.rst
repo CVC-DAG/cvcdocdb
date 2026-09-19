@@ -297,6 +297,40 @@ Example:
     # Idempotent — second call returns False immediately
     graph.init_propagation()  # Returns False
 
+Concurrency & Persistence (NetworkXGraph)
+-----------------------------------------
+
+``NetworkXGraph`` loads the whole persisted graph into memory once per
+instance and writes the whole graph back to disk on every mutation. Two
+instances (in one process or several) pointing at the same
+``persistence_path`` therefore each hold an independent in-memory copy of
+the graph.
+
+Every mutating method (``insertNode``, ``insertRelation``, ``deleteNode``,
+``create_group``, ``init_propagation``, ``enable_vector_index``) guards its
+load-mutate-save cycle with a cross-process file lock (via the ``filelock``
+package): before mutating, it reloads the latest on-disk state under the
+lock, so the mutation is applied on top of whatever another process already
+persisted rather than a stale snapshot. This prevents the classic "two
+writers" lost-update race, where whichever instance saves last would
+otherwise silently erase the other's already-persisted changes.
+
+Nested calls made by a single top-level mutation (for example
+``create_group()`` calling ``insertNode()``/``insertRelation()``
+internally, or ``deleteNode()``'s cascade-delete recursion) detect that the
+lock is already held and skip the reload/save step, so the whole operation
+still reaches disk as one atomic write — and if it raises partway through,
+nothing is written at all, rather than a partially-applied change.
+
+.. note::
+   This makes concurrent access from independent processes/instances
+   *safe* (no silent data loss), but each mutating call is still fully
+   serialized process-wide through a single lock file — there is no
+   fine-grained (per-node/per-edge) concurrency. ``NetworkXGraph`` remains
+   an in-memory backend intended for testing and tutorials; for real
+   concurrent production workloads, use ``Neo4jGraph``, which has proper
+   ACID transactions.
+
 Installation
 ------------
 
