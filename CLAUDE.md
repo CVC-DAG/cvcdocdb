@@ -30,6 +30,20 @@ When the user indicates they want to add a **new feature**, follow these steps:
 
 This ensures new features are developed in isolation when there are active changes on `develop` that might conflict.
 
+### Parallel sessions — use a worktree, not just a branch
+
+If the user says another Claude Code session (or another person/tool) may be working on this repo **at the same time**, or explicitly says "treballa en un worktree a `<path>`": create a **git worktree** for this session's work, not just a new branch in the shared working directory.
+
+```bash
+git worktree add <path> -b <branch-name>
+```
+
+Why: a plain `git checkout -b` still shares the *same working directory* as every other session on this machine. Two sessions editing concurrently — even on different branches — collide on disk: uncommitted changes from one can be silently overwritten, stashed, or left stranded by the other's `git checkout`/`git stash` operations. A worktree gives this session its own working directory while still sharing the same `.git` object database, so concurrent sessions never touch each other's files.
+
+**If a worktree wasn't set up and this is discovered mid-task** (e.g. `git status` shows unrelated modified/untracked files that don't match what this session touched): do not run `git stash`, `git checkout --`, `git reset --hard`, or anything else that discards working-tree state. Those files are very likely another session's uncommitted WIP. Leave them untouched, stage and commit only the files this session actually intended to change, and tell the user what was found.
+
+**Extra safety net: commit often.** Once a change is committed — even to a throwaway WIP branch — it lives in git's object database and is effectively unlosable to another session's working-tree operations. The real risk is always uncommitted changes sitting in a shared working directory. This doesn't relax the "never commit unless explicitly asked" rule above — it's a reason to *ask* for permission to commit proactively when a parallel-session risk is known upfront, not a license to auto-commit.
+
 ## Development Workflow
 
 ### Test-Driven Development (TDD)
