@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0a4] - 2026-09-19
+
 ### Added
 
 - **Cross-process write locking for `NetworkXGraph`** — every mutating method
