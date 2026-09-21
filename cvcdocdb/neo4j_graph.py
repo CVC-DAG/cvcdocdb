@@ -1069,7 +1069,7 @@ class Neo4jGraph:
         # check if node is weak if so, check if  its  parent node is already inserted. If no, raise an exception and cancel the transaction
         # try:
         if node["is_weak"]:
-            if not self.checkNode(node["parent"]):
+            if self.checkNode(node["parent"]) is None:
                 raise Exception(
                     "ADGT Exception: missing parent node  "
                     + str(node["parent"])
