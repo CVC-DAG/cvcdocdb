@@ -409,3 +409,41 @@ class GraphStore(ABC):
         Returns:
             A YAML string suitable for code generation.
         """
+
+    # ------------------------------------------------------------------
+    # Subdocument queries
+    # ------------------------------------------------------------------
+
+    def get_subdocuments(
+        self,
+        strong_node: Node,
+    ) -> List[Dict[str, Any]]:
+        """Return all subdocuments (WeakNodes) reachable from a strong node
+        through ``_propagate`` edges.
+
+        This method follows edges in their declared direction
+        (``parent → child``) and returns every descendant WeakNode
+        as a dict with ``label``, ``pk``, and ``properties`` keys.
+
+        Args:
+            strong_node: The root (non-weak) node whose subdocuments
+                should be retrieved.
+
+        Returns:
+            A list of dicts, one per subdocument:
+
+            .. code-block:: python
+
+                {
+                    "label": "Section",
+                    "pk": {"section": "intro"},
+                    "properties": {"title": "Introduction", ...},
+                }
+
+        Raises:
+            NotImplementedError: If the backend does not support
+                subdocument queries.
+        """
+        raise NotImplementedError(
+            f"get_subdocuments is not supported by {self.__class__.__name__}."
+        )

@@ -906,6 +906,87 @@ class Neo4jGraph:
             "Use NetworkXGraph for vector search."
         )
 
+    def get_subdocuments(self, strong_node: Node) -> List[Dict[str, Any]]:
+        """Return all subdocuments (WeakNodes) reachable from *strong_node*
+        through ``_propagate`` edges.
+
+        Follows edges in their declared direction (parent → child) and
+        returns every descendant WeakNode as a dict with ``label``, ``pk``,
+        and ``properties`` keys.
+
+        Args:
+            strong_node: The root (non-weak) node.
+
+        Returns:
+            A list of dicts, one per subdocument.
+        """
+        if self._closed:
+            raise RuntimeError("Cannot query a closed Neo4jGraph.")
+
+        pk = strong_node._primary_key
+        if pk is None:
+            return []
+
+        # Build MATCH WHERE clause from primary key
+        where_parts = []
+        params = {}
+        for key, val in pk.items():
+            if key == "neo4j_id":
+                where_parts.append("strong.neo4j_id = $strong_id")
+                params["strong_id"] = val
+            else:
+                where_parts.append(f"strong.{key} = $pk_{key}")
+                params[f"pk_{key}"] = val
+        where_clause = " AND ".join(where_parts)
+
+        # Recursive match: follow _propagate edges parent → child
+        query = (
+            "MATCH path = (strong)-[*]->(subdoc) "
+            f"WHERE {where_clause} "
+            "AND ALL(r IN relationships(path) WHERE r._propagate = TRUE) "
+            "RETURN subdoc"
+        )
+
+        result = self._session.run(query, parameters=params)
+        subdocuments: List[Dict[str, Any]] = []
+        seen_pks: set = set()
+
+        for record in result:
+            subdoc = record.get("subdoc")
+            if subdoc is None:
+                continue
+
+            # Convert dict format (driver 6.x) or native object (driver 4.x)
+            if isinstance(subdoc, dict):
+                label = list(subdoc.get("labels", ["?"]))[-1]
+                props = subdoc.get("properties", {})
+            elif hasattr(subdoc, "labels"):
+                label = list(subdoc.labels)[-1]
+                props = dict(subdoc)
+            else:
+                continue
+
+            # Extract PK: remove internal properties (neo4j_id, _weak_init_done,
+            # is_weak, parent_relation) and keep the business PK
+            business_pk = {
+                k: v for k, v in props.items()
+                if not k.startswith("_") and k not in ("neo4j_id", "is_weak")
+            }
+
+            # Deduplicate by PK
+            pk_key = (label, frozenset(business_pk.items()))
+            if pk_key in seen_pks:
+                continue
+            seen_pks.add(pk_key)
+
+            subdocuments.append({
+                "label": label,
+                "pk": business_pk,
+                "properties": props,
+            })
+
+        return subdocuments
+
     def schema_yaml(self, db_name: str) -> str:
         """Introspect the Neo4j database and return a YAML schema description.
 
