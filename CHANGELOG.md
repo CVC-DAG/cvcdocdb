@@ -32,6 +32,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   free at insertion time, and `Individu.__init__` was simplified to rely
   on it instead of duplicating the logic.
 
+### Fixed
+
+- **`Neo4jGraph.query()` never converted a real Neo4j `Node` into the
+  documented `{"labels": [...], "properties": {...}}` dict** — the
+  detection check (`hasattr(value, "properties")`) never matched a real
+  `neo4j.graph.Node` from the driver (it exposes `labels`/`items`/`keys`/
+  `values`/`get`, not `.properties`), so any `RETURN n`-style Cypher query
+  silently returned the raw driver object instead. This had gone
+  undetected because the only test asserting that dict shape ran against
+  `NetworkXGraph`'s own Cypher emulation, not a real Neo4j server. Fixed
+  by checking `hasattr(value, "labels") and hasattr(value, "items")`
+  instead.
+
 ## [1.0.0] - 2026-09-21
 
 ### Added
