@@ -7,6 +7,79 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-09-22
+
+### Added
+
+- **`Node.get_attrs(store)`** — retrieves a node's attributes from a
+  `GraphStore` and, when the node's Python class declares a non-empty
+  `be_value_properties` (e.g. `IndividuPadro.be_value_properties = ("nom",
+  "cognom1", "cognom2")`), automatically resolves each property from its
+  connected `Atribut`/`Valor` node and merges it into the returned dict.
+  A plain `Node`/`WeakNode` (no `be_value_properties`) is returned
+  unchanged, with no extra lookups. Previously, retrieving a node's
+  attributes (`get_node_attrs`, a Cypher query, ...) never included these
+  value properties — you had to manually traverse the `NOM`/`COGNOM1`/...
+  edges to the `Valor` nodes yourself.
+- **`GraphStore.get_dependency_value(node_id, relation_type)`** — new
+  single-hop lookup (implemented in both `NetworkXGraph` and `Neo4jGraph`)
+  that follows one outgoing typed edge and returns the connected node's
+  `name` property. Powers `Node.get_attrs`'s value-property resolution
+  without ever scanning the whole graph.
+- **`be_value_properties` now works on `WeakNode` subclasses, not just
+  `Individu`** — the auto-materialisation of `be_value_properties` into
+  `Atribut` dependencies (previously hardcoded in `Individu.__init__`) was
+  generalised into `Node.__init__` itself, so any `Node` or `WeakNode`
+  subclass that declares `be_value_properties` gets the same behaviour for
+  free at insertion time, and `Individu.__init__` was simplified to rely
+  on it instead of duplicating the logic.
+- **`cvcdocdb.torch_dataloader`** — a new optional module providing a
+  PyTorch/PyTorch Geometric dataloader over `GraphStore` backends:
+  - `GraphDataset`/`GraphDataLoader`: streaming node iteration
+    (zero-copy over `NetworkXGraph`, `SKIP`/`LIMIT` pagination over
+    `Neo4jGraph`), with MongoDB-style label/property filtering.
+  - `SubgraphDataset`/`PyGDataLoader`/`to_pyg_data`: k-hop ego subgraphs
+    and full-graph conversion to `torch_geometric.data.Data`, with
+    optional embeddings merged into `data.x` and kept separately on
+    `data.emb`.
+  - `to_hetero_edge_index_dict`: lightweight full-graph heterogeneous
+    topology loader (single pass over edges, no node attributes) for
+    algorithms that need the whole graph, e.g. `MetaPath2Vec`.
+  - `split_edges_by_node_property`: N-way (train/val/test/...) edge
+    split by a per-node property, with overlap detection.
+  - `edge_embeddings`: combine node embeddings into an edge
+    representation (hadamard/concat/average/l1/l2/dot) for link
+    prediction.
+  - A tutorial notebook (`torch_dataloader_bibliography.ipynb`) covers
+    the full flow on the bibliography dataset: streaming, subgraphs
+    with embeddings, `MetaPath2Vec` training, and link prediction.
+
+### Fixed
+
+- **`Neo4jGraph.query()` never converted a real Neo4j `Node` into the
+  documented `{"labels": [...], "properties": {...}}` dict** — the
+  detection check (`hasattr(value, "properties")`) never matched a real
+  `neo4j.graph.Node` from the driver (it exposes `labels`/`items`/`keys`/
+  `values`/`get`, not `.properties`), so any `RETURN n`-style Cypher query
+  silently returned the raw driver object instead. This had gone
+  undetected because the only test asserting that dict shape ran against
+  `NetworkXGraph`'s own Cypher emulation, not a real Neo4j server. Fixed
+  by checking `hasattr(value, "labels") and hasattr(value, "items")`
+  instead.
+- **`torch_dataloader.GraphDataset`'s Neo4j path silently dropped
+  `$or`/`$and`/`$not`/`$regex`/`$contains` in `property_filter`** instead
+  of applying them as an in-memory fallback (as already documented and
+  already done for `NetworkXGraph`) — fixed by running the full filter
+  through `_nx_match` on every fetched row.
+- **`torch_dataloader.GraphDataset` always returned `node_id=None` for
+  the Neo4j backend** — fixed by fetching `id(n)` alongside the node.
+- **`torch_dataloader.GraphDataset`'s Neo4j `SKIP`/`LIMIT` pagination
+  had no `ORDER BY`**, so row order (and therefore the per-worker
+  slicing for multi-worker `DataLoader`) wasn't stable across
+  round-trips — a node could be yielded twice or skipped entirely.
+- **`torch_dataloader.to_pyg_data` crashed on an empty store** when
+  `node_attrs` was left at its default of `None`.
+
 ## [1.0.0] - 2026-09-21
 
 ### Added

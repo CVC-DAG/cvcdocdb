@@ -296,6 +296,28 @@ class GraphStore(ABC):
         """
         return None
 
+    def get_dependency_value(self, node_id: int, relation_type: str) -> Optional[str]:
+        """Return the ``name`` primary key of the single node reachable from
+        *node_id* via an outgoing *relation_type* edge.
+
+        Used to resolve ``be_value_properties`` (see :class:`~cvcdocdb.drm_entities.Individu`):
+        a property such as ``nom`` is materialised at insert time as a
+        separate ``Atribut``/``Valor`` node connected via a ``NOM`` edge
+        instead of being stored directly on the node. This is a targeted,
+        single-hop lookup — it must not scan the whole graph.
+
+        Args:
+            node_id: Internal id of the source node.
+            relation_type: Relation type to follow (e.g. ``"NOM"``).
+
+        Returns:
+            The connected node's ``name`` pk value, or None if there is no
+            such edge.
+
+        Default implementation returns None.
+        """
+        return None
+
     # ------------------------------------------------------------------
     # Debug helpers (concrete default — may be overridden)
     # ------------------------------------------------------------------

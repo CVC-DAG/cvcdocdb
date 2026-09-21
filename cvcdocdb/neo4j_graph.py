@@ -582,6 +582,22 @@ class Neo4jGraph:
             return None
         return dict(single["r"])
 
+    def get_dependency_value(self, node_id: int, relation_type: str) -> Optional[str]:
+        """Return the ``name`` property of the node reachable via a single
+        outgoing *relation_type* edge from *node_id*.
+
+        Targeted single-hop Cypher query — never scans the whole graph.
+        """
+        _validate_cypher_identifier(relation_type, "relation type")
+        result = self._session.run(
+            "MATCH (a)-[:" + relation_type + "]->(b) "
+            "WHERE id(a) = $nid "
+            "RETURN b.name AS name LIMIT 1",
+            nid=node_id,
+        )
+        single = result.single()
+        return single["name"] if single is not None else None
+
     # ------------------------------------------------------------------
     # Public API: Query
     # ------------------------------------------------------------------
@@ -1820,6 +1836,11 @@ def _convert_neo4j_value(value: Any) -> Any:
         return None
 
     # --- Native Neo4j objects (driver 4.x / raw mode) ---
+    # The real driver's neo4j.graph.Node behaves as a Mapping
+    # (`.items()`/`dict(value)`); older driver versions expose
+    # `.properties` instead. Checking only for `.properties` (as this used
+    # to) never matched a real Node on driver 6.x, silently returning the
+    # raw driver object from every RETURN n query instead of this dict.
     if hasattr(value, "labels") and (hasattr(value, "properties") or hasattr(value, "items")):
         # Neo4j Node (driver 4.x has .properties, driver 6.x has .items())
         return {
