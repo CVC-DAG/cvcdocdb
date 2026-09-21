@@ -1653,6 +1653,97 @@ class EntitiesTest(unittest.TestCase):
         self.assertIn("cognom1", ind._dependencies)
         self.assertIsInstance(ind._dependencies["nom"], Atribut)
 
+    def _make_isolated_graph(self) -> NetworkXGraph:
+        """A NetworkXGraph backed by a throwaway persistence file, so each
+        test starts from an empty graph regardless of leftover state from
+        the default (shared, on-disk) persistence path."""
+        path = tempfile.mktemp(suffix=".pkl")
+        self.addCleanup(lambda: os.path.exists(path) and os.remove(path))
+        return NetworkXGraph(persistence_path=path)
+
+    def test_individu_padro_get_attrs_hydrates_value_properties(self) -> None:
+        """get_attrs recupera nom/cognom1 dels nodes Valor connectats."""
+        graph = self._make_isolated_graph()
+        ind = IndividuPadro(pk=1, nom="Oriol", cognom1="Ramos")
+        graph.insertNode(ind)
+        attrs = ind.get_attrs(graph)
+        self.assertEqual(attrs["nom"], "oriol")
+        self.assertEqual(attrs["cognom1"], "ramos")
+        graph.close()
+
+    def test_individu_padro_get_attrs_missing_value_property(self) -> None:
+        """get_attrs no afegeix una clau per a un be_value_property no proporcionat."""
+        graph = self._make_isolated_graph()
+        ind = IndividuPadro(pk=1, nom="Oriol")
+        graph.insertNode(ind)
+        attrs = ind.get_attrs(graph)
+        self.assertEqual(attrs["nom"], "oriol")
+        self.assertNotIn("cognom1", attrs)
+        self.assertNotIn("cognom2", attrs)
+        graph.close()
+
+    def test_individu_foto_get_attrs_no_hydration(self) -> None:
+        """get_attrs no fa cap consulta extra per a be_value_properties buit."""
+        graph = self._make_isolated_graph()
+        foto = IndividuFoto(pk=2)
+        graph.insertNode(foto)
+        attrs = foto.get_attrs(graph)
+        self.assertNotIn("nom", attrs)
+        graph.close()
+
+    def test_generic_node_get_attrs_no_hydration(self) -> None:
+        """Un Node generic (sense be_value_properties) no es connecta amb res extern."""
+        graph = self._make_isolated_graph()
+        node = Node(pk={"id": 99}, main_label="TestNode", foo="bar")
+        graph.insertNode(node)
+        attrs = node.get_attrs(graph)
+        self.assertEqual(attrs.get("foo"), "bar")
+        self.assertNotIn("nom", attrs)
+        graph.close()
+
+    def test_get_attrs_does_not_mutate_store_state(self) -> None:
+        """get_attrs no ha de mutar el dict intern del backend."""
+        graph = self._make_isolated_graph()
+        ind = IndividuPadro(pk=1, nom="Oriol")
+        graph.insertNode(ind)
+        ind.get_attrs(graph)
+        raw = graph.get_node_attrs(ind.neo4j_id)
+        self.assertNotIn("nom", raw)
+        graph.close()
+
+    def test_weaknode_be_value_properties_creates_dependencies(self) -> None:
+        """Un WeakNode que declara be_value_properties materialitza Atribut
+        a la construcció, igual que Individu/IndividuPadro."""
+
+        class SeccioAmbTitol(WeakNode):
+            be_value_properties = ("titol",)
+
+        parent = Node(pk={"id": 1}, main_label="Document")
+        sec = SeccioAmbTitol(parent=parent, pk=1, main_label="Seccio", titol="Introduccio")
+        self.assertIsNotNone(sec._dependencies)
+        self.assertIn("titol", sec._dependencies)
+        self.assertIsInstance(sec._dependencies["titol"], Atribut)
+
+    def test_weaknode_be_value_properties_get_attrs_hydrates(self) -> None:
+        """get_attrs sobre un WeakNode resol be_value_properties des del Valor."""
+
+        class SeccioAmbTitol(WeakNode):
+            be_value_properties = ("titol",)
+
+        graph = self._make_isolated_graph()
+        parent = Node(pk={"id": 1}, main_label="Document")
+        sec = SeccioAmbTitol(parent=parent, pk=1, main_label="Seccio", titol="Introduccio")
+        graph.insertNode(sec)
+        attrs = sec.get_attrs(graph)
+        self.assertEqual(attrs["titol"], "introduccio")
+        graph.close()
+
+    def test_weaknode_without_be_value_properties_unaffected(self) -> None:
+        """Un WeakNode genèric (sense be_value_properties) no crea dependencies."""
+        parent = Node(pk={"id": 1}, main_label="Document")
+        page = WeakNode(parent=parent, pk=1, main_label="Page", ruta="/x")
+        self.assertIsNone(page._dependencies)
+
     def test_individu_foto_creation(self) -> None:
         """Test que IndividuFoto es pugui crear amb pk."""
         foto = IndividuFoto(pk=1)

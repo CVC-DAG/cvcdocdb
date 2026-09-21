@@ -582,6 +582,22 @@ class Neo4jGraph:
             return None
         return dict(single["r"])
 
+    def get_dependency_value(self, node_id: int, relation_type: str) -> Optional[str]:
+        """Return the ``name`` property of the node reachable via a single
+        outgoing *relation_type* edge from *node_id*.
+
+        Targeted single-hop Cypher query — never scans the whole graph.
+        """
+        _validate_cypher_identifier(relation_type, "relation type")
+        result = self._session.run(
+            "MATCH (a)-[:" + relation_type + "]->(b) "
+            "WHERE id(a) = $nid "
+            "RETURN b.name AS name LIMIT 1",
+            nid=node_id,
+        )
+        single = result.single()
+        return single["name"] if single is not None else None
+
     # ------------------------------------------------------------------
     # Public API: Query
     # ------------------------------------------------------------------

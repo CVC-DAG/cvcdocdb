@@ -111,17 +111,14 @@ class Individu(Node):
             al = ["Individu"]
 
         if precondition or ignore_assertion:
-            deps = {}
-            for r in self.be_value_properties:
-                valor = kwargs.pop(r, None)
-                if valor is not None:
-                    deps[r] = Atribut(valor)
+            # be_value_properties (e.g. "nom", "cognom1" on IndividuPadro)
+            # are materialised as Atribut dependencies generically by
+            # Node.__init__ — see base.py.
             Node.__init__(
                 self,
                 main_label=self._main_label(),
                 pk=pk,
                 alternative_labels=al,
-                dependencies=deps,
                 **kwargs,
             )
         else:

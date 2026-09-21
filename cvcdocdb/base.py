@@ -92,6 +92,16 @@ class Node:
     key is merged with the parent's key to form a composite key, and a typed
     edge is created when the node is inserted into a graph store.
 
+    A subclass may declare a class-level ``be_value_properties`` tuple
+    (empty by default — plain ``Node``/``WeakNode`` instances have none, see
+    :class:`~cvcdocdb.drm_entities.Individu`). Any of those names passed as
+    a kwarg here is popped and wrapped as an
+    :class:`~cvcdocdb.drm_entities.Atribut` dependency instead of being
+    stored as a plain attribute; it is materialised as a separate
+    ``Valor`` node connected by a typed edge (``PROP_NAME``) once this node
+    is inserted into a graph store. Use :meth:`get_attrs` to resolve it
+    back when reading the node.
+
     By default a node **must** have a ``pk`` or a ``neo4j_id`` (or both).
     If the caller passes ``pk=None`` explicitly, the node is created with
     ``_primary_key = None`` and the backend is expected to assign a real
@@ -187,11 +197,23 @@ class Node:
                 parent_relation if parent_relation is not None else "HAS"
             )
 
-        dependencies = kwargs.pop("dependencies", False)
-        if dependencies:
-            self._dependencies = dependencies
-        else:
-            self._dependencies = None
+        dependencies = kwargs.pop("dependencies", False) or {}
+
+        # Auto-materialise be_value_properties (see Individu/IndividuPadro in
+        # drm_entities.py) as Atribut dependencies. Generic to any Node
+        # subclass — including WeakNode — that declares a non-empty
+        # be_value_properties tuple; a plain Node/WeakNode has none and this
+        # is a no-op.
+        be_value_properties = getattr(type(self), "be_value_properties", ())
+        if be_value_properties:
+            from .drm_entities import Atribut  # local import: avoids a cycle
+            for prop in be_value_properties:
+                if prop in kwargs:
+                    value = kwargs.pop(prop)
+                    if value is not None:
+                        dependencies[prop] = Atribut(value)
+
+        self._dependencies = dependencies or None
 
         if kwargs is not None:
             for k in kwargs:
@@ -359,6 +381,34 @@ class Node:
     def keys(self) -> List[str]:
         """Return all public attribute names."""
         return [k for k in self.__dict__.keys() if not k.startswith("_")]
+
+    def get_attrs(self, store: Any) -> Dict[str, Any]:
+        """Return this node's attributes as stored in *store*, with any
+        ``be_value_properties`` resolved back from their ``Atribut``/``Valor``
+        nodes.
+
+        Subclasses such as :class:`~cvcdocdb.drm_entities.IndividuPadro`
+        declare ``be_value_properties`` (e.g. ``("nom", "cognom1")``): those
+        values are stored at insert time as separate ``Valor`` nodes linked
+        by a typed edge (see :meth:`GraphStore.get_dependency_value`)
+        instead of as plain attributes on this node. A generic ``Node`` or
+        ``WeakNode`` — which has no ``be_value_properties`` — is returned
+        unchanged, with no extra lookups against *store*.
+
+        Args:
+            store: A connected ``GraphStore`` (``NetworkXGraph`` or
+                ``Neo4jGraph``) that holds this node.
+
+        Returns:
+            A copy of this node's attribute dict, with any
+            ``be_value_properties`` merged in.
+        """
+        attrs = dict(store.get_node_attrs(self._neo4j_id) or {})
+        for prop in getattr(type(self), "be_value_properties", ()):
+            value = store.get_dependency_value(self._neo4j_id, prop.upper())
+            if value is not None:
+                attrs[prop] = value
+        return attrs
 
 
 # Class Relation denotes the relation of two nodes in the graph database
