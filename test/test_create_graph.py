@@ -58,7 +58,7 @@ def _cleanup_graph(graph: Neo4jGraph) -> None:
         graph._tx = None
 
 
-class ADGTTest(unittest.TestCase):
+class CVCDocDBTest(unittest.TestCase):
     """Tests d'integració amb Neo4j per a creació de nodes i relacions."""
 
     def test_node(self):
