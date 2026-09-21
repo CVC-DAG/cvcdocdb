@@ -1,0 +1,8 @@
+# Extra dependencies needed to run the test suite (not required to use the
+# library itself — see requirements.txt for that).
+#
+#   pip install -r requirements.txt -r requirements-test.txt
+-r requirements.txt
+pytest
+python-dotenv
+testcontainers

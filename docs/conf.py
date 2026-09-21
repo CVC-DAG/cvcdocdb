@@ -24,7 +24,7 @@ try:
 except ImportError:
     cvcdocdb_version = None
 
-release = cvcdocdb_version if cvcdocdb_version else "1.1.0rc1"
+release = cvcdocdb_version if cvcdocdb_version else "1.0.0"
 version = release
 
 # -- General configuration ---------------------------------------------------

@@ -38,6 +38,35 @@ connection timeout — this is what keeps a plain `pytest test/` fast (~5s)
 even without a local Neo4j instance running. When a real server is reachable,
 those tests run normally.
 
+### Automatic local Neo4j via Docker
+
+Install the extra test dependencies once:
+
+```bash
+pip install -r requirements-test.txt
+```
+
+If nothing answers on `NEO4J_DEV_URL`/`NEO4J_URL`, Docker is installed, and
+the `testcontainers` package is available, `conftest.py` automatically starts
+a disposable `neo4j:5-community` container (bolt on `7687`, HTTP on `7474`,
+credentials `neo4j` / `neo4j2026` — matching `.env.example`) before the test
+session runs, and stops it again when the session ends. This means
+`pytest test/` (or `pytest test/ -m slow`) runs the real Neo4j tests locally
+with zero manual setup, as long as Docker Desktop/Engine is running.
+
+If Docker isn't available, or the container fails to start (e.g. ports 7687
+or 7474 already in use), this is reported to stdout and the suite falls back
+to the automatic skip described above.
+
+To manage the container yourself instead (e.g. to keep it running across
+multiple test runs), use the provided compose file:
+
+```bash
+docker compose -f docker-compose.neo4j.yml up -d
+pytest test/ -m slow
+docker compose -f docker-compose.neo4j.yml down
+```
+
 ## Test files
 
 ### Unit (no graph store)

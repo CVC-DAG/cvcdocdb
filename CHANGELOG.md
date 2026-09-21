@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-09-21
+
+### Added
+
+- **Local Neo4j via Docker for the test suite** — `test/conftest.py` now
+  starts a disposable `neo4j:5-community` container automatically (via the
+  new `testcontainers` test dependency, see `requirements-test.txt`) when
+  no server answers on `NEO4J_DEV_URL`/`NEO4J_URL` and Docker is available,
+  falling back to the existing auto-skip otherwise. A `docker-compose.neo4j.yml`
+  is also provided for running one manually. See `test/README.md`.
+
+### Fixed
+
+- **`Neo4jGraph._insertNode` treated a valid Neo4j internal node id of `0`
+  as a missing parent** — the WeakNode parent check used
+  `if not self.checkNode(node["parent"])`, and Neo4j's internal ids are
+  0-indexed, so the very first node created after a full DB wipe (id `0`)
+  was incorrectly reported as "missing parent node" even though it had
+  just been inserted correctly. Changed to an explicit `is None` check.
+- **`Neo4jGraph.insertNode(update=False, replace=False)` silently created
+  a duplicate node** instead of refusing the insert when one with the same
+  primary key already existed — unlike `NetworkXGraph`, which already
+  raised `RuntimeError("Duplicate key: ...")` in this case. Two earlier
+  attempts to fix this via a Neo4j `NODE KEY` constraint were reverted
+  (the same `main_label` is reused across callers with different pk
+  shapes, so a DB-level constraint for one shape broke inserts using
+  another); duplicate-key detection is now done in Python instead,
+  mirroring `NetworkXGraph`'s behaviour.
+- **Renamed the obsolete "ADGT"/"XPP" naming** in `Neo4jGraph`'s
+  exception/log messages (and one test class name) to "CVCDocDB".
+
 ## [1.0.0a4] - 2026-09-19
 
 ### Added
@@ -51,6 +82,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `test/test_close_no_unconditional_save.py`, which reproduces the exact
   data-loss scenario and fails without the fix.
 
+- **`Neo4jGraph._insertNode` treated a valid Neo4j internal node id of `0`
+  as a missing parent** — the WeakNode parent check used
+  `if not self.checkNode(node["parent"])`, and Neo4j's internal ids are
+  0-indexed, so the very first node created after a full DB wipe (id `0`)
+  was incorrectly reported as "missing parent node" even though it had
+  just been inserted correctly. Changed to an explicit `is None` check.
+- **`Neo4jGraph.insertNode(update=False, replace=False)` silently created
+  a duplicate node** instead of refusing the insert when one with the same
+  primary key already existed — unlike `NetworkXGraph`, which already
+  raised `RuntimeError("Duplicate key: ...")` in this case. Two earlier
+  attempts to fix this via a Neo4j `NODE KEY` constraint were reverted
+  (the same `main_label` is reused across callers with different pk
+  shapes, so a DB-level constraint for one shape broke inserts using
+  another); duplicate-key detection is now done in Python instead,
+  mirroring `NetworkXGraph`'s behaviour.
+- **Renamed the obsolete "ADGT"/"XPP" naming** in `Neo4jGraph`'s
+  exception/log messages (and one test class name) to "CVCDocDB".
+
 ## [1.0.0a3] - 2026-09-19
 
 ### Security
@@ -90,9 +139,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   are now readable through the dict-like interface, and `node["pk"] = ...`
   no longer raises `KeyError`.
 - **`_mergePK`** — no longer mutates the caller's own `pk` dict in place.
-
-### Fixed
-
 - **`schema_gen.py` generated classes corrupted partial `insertNode`/`insertRelation`
   merges** — every generated `Node`/`Relation`/`WeakNode` subclass unconditionally
   assigned `self.<prop> = kwargs.get("<prop>", "<type-name>")` for every schema
@@ -110,46 +156,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   no longer invent a value for a field the caller didn't pass. Added a
   regression test (`test_generated_class_partial_update_preserves_fields`)
   that reproduces the corruption end-to-end through `NetworkXGraph`.
-
-## [1.0.0a3] - 2026-09-19
-
-### Security
-
-- **Complete label validation in `neo4j_graph.py`'s `insertNode`** — the
-  1.0.0a2 fix only validated `main_label`; `alternative_labels` and
-  dependency nodes (inserted via the internal `_insertNode` path) were
-  not checked and could still inject Cypher through the node's label
-  list. Validation now runs inside `_insertNode` itself, covering every
-  path that reaches it.
-- **Parameterized Cypher in the RiC-O/NAF example loader** — `cvcdocdb.exemples.load_ric_o_naf`
-  built Cypher via raw string interpolation of node/relationship ids and
-  property values extracted from RDF/XML downloaded from GitHub,
-  bypassing the validators added in 1.0.0a2. Now uses `Neo4jGraph.query()`'s
-  `params` argument instead of splicing untrusted values into query text.
-
-## [1.0.0a2] - 2026-09-18
-
-### Security
-
-- **Code-injection prevention in `schema_gen.py`** — untrusted, ontology-derived
-  strings (class names, property names, `rdfs:comment` docstrings) are now
-  validated as safe Python identifiers or escaped with `repr()` before being
-  spliced into generated entity-class source, closing an arbitrary-code-execution
-  path via a crafted RDF/OWL ontology.
-- **Cypher-injection prevention in `neo4j_graph.py`** — `pk` values, node
-  labels, and relation types are now escaped/validated before being
-  interpolated into `WHERE`/`MERGE`/`MATCH` clauses.
-- **Hardened default pickle persistence path in `networkx_graph.py`** —
-  `NetworkXGraph()`'s default persistence file now lives in a per-user,
-  permission-restricted cache directory instead of the shared system temp
-  dir, and refuses to unpickle a file it doesn't own.
-
-### Fixed
-
-- **`Node.__getitem__`/`__setitem__`** — custom attributes set via kwargs
-  are now readable through the dict-like interface, and `node["pk"] = ...`
-  no longer raises `KeyError`.
-- **`_mergePK`** — no longer mutates the caller's own `pk` dict in place.
 
 ### Changed
 
