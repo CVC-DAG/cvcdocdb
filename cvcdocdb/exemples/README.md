@@ -1,4 +1,4 @@
-# DRM exemples
+# CVCDocDB exemples
 
 Aquest directori conté loaders de datasets per tutorials:
 
