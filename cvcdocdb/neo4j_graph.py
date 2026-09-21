@@ -1830,8 +1830,12 @@ def _convert_neo4j_value(value: Any) -> Any:
     """
     if value is None:
         return None
-    if hasattr(value, "labels") and hasattr(value, "properties"):
-        # Neo4j Node
+    if hasattr(value, "labels") and hasattr(value, "items"):
+        # Neo4j Node — the real driver's neo4j.graph.Node has `.labels` and
+        # behaves as a Mapping (`.items()`/`dict(value)`) but has no
+        # `.properties` attribute; checking for that (as before) meant this
+        # branch never matched a real Node, silently returning the raw
+        # driver object from every RETURN n query instead of this dict.
         return {
             "labels": list(value.labels),
             "properties": dict(value),
