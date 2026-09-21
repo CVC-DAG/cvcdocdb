@@ -1,4 +1,4 @@
-__version__ = "1.1.0a3"
+__version__ = "0.0.0.dev0"  # real version numbers only live on `main` — see CLAUDE.md branch strategy
 
 from .base import *
 from .drm_entities import *
