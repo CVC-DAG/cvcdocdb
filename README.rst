@@ -6,7 +6,7 @@ Archives, libraries, and document collections are rarely flat files: documents h
 CVCDocDB
 --------
 
-**CVCDocDB** is a Python library developed by the Document Image group at the `Centre de Visió per Computador <https://www.cvc.uab.es/>`_ (CVC), within the framework of the **SUKIDI** project, to represent the contents of documents according to a Document Representation Model. It offers a graph-based API with two interchangeable backends -- a persistent Neo4j store and an in-memory NetworkX store for testing and tutorials -- together with semantic entity definitions, WeakNode hierarchies with cascade delete, foreign key validation, vector search, and ready-to-run example datasets for getting started quickly.
+**CVCDocDB** is a Python library developed by the Document Analysis Group (DAG) at the `Centre de Visió per Computador <https://www.cvc.uab.es/>`_ (CVC), within the framework of the **SUKIDI** project, to represent the contents of documents according to a Document Representation Model. It offers a graph-based API with two interchangeable backends -- a persistent Neo4j store and an in-memory NetworkX store for testing and tutorials -- together with semantic entity definitions, WeakNode hierarchies with cascade delete, foreign key validation, vector search, and ready-to-run example datasets for getting started quickly.
 
 Features
 --------
@@ -191,13 +191,17 @@ Running Tests
 
 .. code:: bash
 
+    pip install -r requirements-test.txt
     python -m pytest test/ -v
 
 Three test levels:
 
 * **Unit** (``-m unit``) -- fast, no graph store
 * **Integration** (``-m integration``) -- NetworkXGraph (in-memory)
-* **Neo4j** (``-m slow``) -- requires a real Neo4j connection; auto-skipped otherwise
+* **Neo4j** (``-m slow``) -- requires a real Neo4j connection. If none is
+  reachable and Docker is available, a disposable ``neo4j:5-community``
+  container is started automatically; otherwise these tests auto-skip.
+  See ``test/README.md`` for details and the manual ``docker-compose.neo4j.yml`` option.
 
 Skip Neo4j tests: ``pytest test/ -v -m "not slow"``
 
@@ -222,4 +226,4 @@ Authors and Contributors
 Acknowledgements
 ----------------
 
-This work has been partially supported by the Spanish project PID2024-157778OB-I00, Ministerio de Ciencia e Innovación, the Departament de Cultura of the Generalitat de Catalunya, and the CERCA Program / Generalitat de Catalunya. Adrià Molina is funded with the PRE2022-101575 grant provided by MCIN / AEI / 10.13039 / 501100011033 and by the European Social Fund (FSE+).
+This work has been partially supported by the Spanish projects PID2021-126808OB-I00 and PID2024-157778OB-I00, Ministerio de Ciencia e Innovación, the Departament de Cultura of the Generalitat de Catalunya, and the CERCA Program / Generalitat de Catalunya. Adrià Molina is funded with the PRE2022-101575 grant provided by MCIN / AEI / 10.13039 / 501100011033 and by the European Social Fund (FSE+).

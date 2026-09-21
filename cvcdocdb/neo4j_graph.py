@@ -325,7 +325,7 @@ class Neo4jGraph:
                     self._remove_from_fk_index(node.neo4j_id)
                 res = self._delete_node(self._tx, node, detach=False)
         except ConstraintError as err:
-            print(f"[XPP Message]: {err.message}")
+            print(f"[CVCDocDB Message]: {err.message}")
             return False
         except TransactionError as err:
             msg = str(err)
@@ -482,7 +482,7 @@ class Neo4jGraph:
                 # Add FK index entries after create
                 self._update_fk_index_for_relation(self._tx, rel)
         except ConstraintError as err:
-            print("[XPP Message]: " + err.message)
+            print("[CVCDocDB Message]: " + err.message)
             raise
         except TransactionError as err:
             print(err)
@@ -1150,9 +1150,9 @@ class Neo4jGraph:
         # check if node is weak if so, check if  its  parent node is already inserted. If no, raise an exception and cancel the transaction
         # try:
         if node["is_weak"]:
-            if not self.checkNode(node["parent"]):
+            if self.checkNode(node["parent"]) is None:
                 raise Exception(
-                    "ADGT Exception: missing parent node  "
+                    "CVCDocDB Exception: missing parent node  "
                     + str(node["parent"])
                     + ". Insert it before "
                     + str(node)
@@ -1166,10 +1166,22 @@ class Neo4jGraph:
         # Check if node already exists
         _trasa = ""
         try:
-            # Add constraints
+            # NB: Neo4j-side uniqueness constraints (NODE KEY) were tried
+            # historically and reverted — the same main_label is reused
+            # across unrelated tests/callers with different pk shapes, so a
+            # DB-level constraint on one shape breaks inserts using another.
+            # Duplicate-key detection is therefore done here, in Python,
+            # mirroring NetworkXGraph's insertNode (see networkx_graph.py).
 
-            # self._create_constraint(self._tx, node.main_label, list(pk.keys()))
-            # self._session.write_transaction(self._create_constraint, node.main_label, list(pk.keys()))
+            # WeakNodes whose PK was backend-generated (pk=None originally)
+            # have a PK equal to their parent's PK until they get their own
+            # neo4j_id — never treat those as duplicates.
+            is_backend_assigned_pk = (
+                node["is_weak"]
+                and node._parent is not None
+                and node._parent._primary_key is not None
+                and node._primary_key == node._parent._primary_key
+            )
 
             if update:
                 # id = self._session.write_transaction(self._update_node, node)
@@ -1177,7 +1189,7 @@ class Neo4jGraph:
                 id = self._update_node(self._tx, node)
                 _trasa += "(1) Actualitza el node "
             else:
-                id = self.checkNode(node)
+                id = self.checkNode(node) if not is_backend_assigned_pk else None
                 if isinstance(id, int) and not isinstance(id, bool):
                     if replace:
                         # ON UPDATE CASCADE: in Neo4j, edges reference nodes
@@ -1187,6 +1199,13 @@ class Neo4jGraph:
                         # relations if needed.
                         self.deleteNode(node, detach=True, propagation=True)
                         _trasa += "(1) esborra el node "
+                    else:
+                        raise RuntimeError(
+                            f"Duplicate key: node with pk={node._primary_key} "
+                            f"and main_label={node.main_label} already exists "
+                            f"(id={id}). Use replace=True to overwrite or "
+                            f"update=True to merge attributes."
+                        )
                 # id = self._session.write_transaction(self._create_node, node)
                 # print("create node")
                 id = self._create_node(self._tx, node)
@@ -1221,7 +1240,7 @@ class Neo4jGraph:
                     for ppk in node["parent"]["pk"]["pk"]:
                         if not node["parent"]["pk"]["pk"][ppk] == node["pk"]["pk"][ppk]:
                             raise RuntimeError(
-                                "ADGT Exception: Integrity Constraint Violated. Child node keys does not reference proper parent keys"
+                                "CVCDocDB Exception: Integrity Constraint Violated. Child node keys does not reference proper parent keys"
                             )
 
                 self.insertRelation(
@@ -1236,10 +1255,10 @@ class Neo4jGraph:
                 )
 
         except ConstraintError as err:
-            warnings.warn(f"[XPP Message]: {err.message}")
+            warnings.warn(f"[CVCDocDB Message]: {err.message}")
             id = self.checkNode(node)
             return id
-            # raise RuntimeError("ADGT Exception: " + err.message + " " + _trasa) from err
+            # raise RuntimeError("CVCDocDB Exception: " + err.message + " " + _trasa) from err
 
         return id
 
@@ -1374,35 +1393,9 @@ class Neo4jGraph:
             ).value("id")[0]
             return result
         except ConstraintError as err:
-            # CREATE failed (likely due to constraint on different keys).
-            # Fall back to MERGE to create or find the node.
-            print(f"[ADGT Message]: CREATE failed — falling back to MERGE")
-            print(f"  label: {node.main_label}")
-            print(f"  pk: {pk}")
-            merge_where = _generate_where_cond("a", pk, type="merge")
-            print(f"  merge_where: {merge_where}")
-            merge_query = (
-                "MERGE (a"
-                + main_label
-                + " { "
-                + merge_where
-                + " })"
-                + " ON CREATE SET a"
-                + labels
-                + ", a = $prop_dict"
-                + " ON MATCH SET a"
-                + labels
-                + ", a += $prop_dict"
-                + " RETURN id(a) AS id"
-            )
-            print(f"  merge_query: {merge_query}")
-            try:
-                result = tx.run(merge_query, prop_dict=props).value("id")[0]
-                print(f"  MERGE succeeded: {result}")
-                return result
-            except Exception as merge_err:
-                print(f"[ADGT Message]: MERGE also failed: {merge_err}")
-                return None
+            print("[CVCDocDB Message]: " + err.message)
+            print("node already inserted")
+            return None
 
     @staticmethod
     def _update_node(tx: Any, node: Node) -> int:
@@ -1759,7 +1752,7 @@ class Neo4jGraph:
 
             result = tx.run(query)
         except ConstraintError as err:
-            print("[ADGT Message]: " + err.message)
+            print("[CVCDocDB Message]: " + err.message)
             pass
 
     @staticmethod

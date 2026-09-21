@@ -1,4 +1,4 @@
-__version__ = "1.0.0a1"
+__version__ = "1.0.0"
 
 from .base import *
 from .drm_entities import *

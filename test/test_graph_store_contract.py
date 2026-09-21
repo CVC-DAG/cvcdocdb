@@ -576,7 +576,6 @@ class TestNeo4jGraph(unittest.TestCase):
         with self.assertRaises(RuntimeError) as ctx:
             graph.deleteNode(a, detach=False)
         self.assertIn("ON DELETE RESTRICT", str(ctx.exception))
-        graph.close()
 
     @pytest.mark.slow
     def test_contract_delete_restrict_succeeds_without_edges(self) -> None:
@@ -585,7 +584,6 @@ class TestNeo4jGraph(unittest.TestCase):
         graph.insertNode(a, replace=True)
         result = graph.deleteNode(a, detach=False)
         self.assertTrue(result)
-        graph.close()
 
     # -- ON DELETE CASCADE --
 
@@ -597,7 +595,6 @@ class TestNeo4jGraph(unittest.TestCase):
         self.assertTrue(result)
         self.assertEqual(len(graph.get_node_ids()), 2)
         self.assertEqual(len(graph.get_edges()), 0)
-        graph.close()
 
     @pytest.mark.slow
     def test_contract_delete_cascade_leaves_orphans(self) -> None:
@@ -608,7 +605,6 @@ class TestNeo4jGraph(unittest.TestCase):
         self.assertIn({"id": 2}, pks)
         pks = [p["pk"] for p in graph.get_node_pks()]
         self.assertIn({"id": 3}, pks)
-        graph.close()
 
     @pytest.mark.slow
     def test_contract_delete_cascade_chain(self) -> None:
@@ -617,7 +613,6 @@ class TestNeo4jGraph(unittest.TestCase):
         graph.deleteNode(a, detach=True)
         self.assertEqual(len(graph.get_node_ids()), 2)
         self.assertEqual(len(graph.get_edges()), 1)
-        graph.close()
 
     # -- ON DELETE SET NULL --
 
@@ -632,7 +627,6 @@ class TestNeo4jGraph(unittest.TestCase):
         self.assertIn({"id": 2}, pks)
         pks = [p["pk"] for p in graph.get_node_pks()]
         self.assertIn({"id": 3}, pks)
-        graph.close()
 
     @pytest.mark.slow
     def test_contract_delete_set_null_no_cascade_to_neighbors(self) -> None:
@@ -644,7 +638,6 @@ class TestNeo4jGraph(unittest.TestCase):
         self.assertIn({"id": 1}, pks)
         pks = [p["pk"] for p in graph.get_node_pks()]
         self.assertIn({"id": 3}, pks)
-        graph.close()
 
     # -- ON UPDATE CASCADE --
 
@@ -656,7 +649,6 @@ class TestNeo4jGraph(unittest.TestCase):
         graph.insertNode(a_updated, update=True)
         self.assertEqual(len(graph.get_node_ids()), 3)
         self.assertEqual(len(graph.get_edges()), 2)
-        graph.close()
 
     # -- REPLACE --
 
@@ -668,7 +660,6 @@ class TestNeo4jGraph(unittest.TestCase):
         graph.insertNode(a_new, replace=True)
         self.assertEqual(len(graph.get_node_ids()), 3)
         self.assertEqual(len(graph.get_edges()), 0)
-        graph.close()
 
     # -- FK VIOLATION --
 
@@ -683,7 +674,6 @@ class TestNeo4jGraph(unittest.TestCase):
             graph.insertRelation(rel)
         self.assertIn("FK violation", str(ctx.exception))
         self.assertIn("src", str(ctx.exception))
-        graph.close()
 
     @pytest.mark.slow
     def test_contract_fk_violation_dst_missing(self) -> None:
@@ -696,7 +686,6 @@ class TestNeo4jGraph(unittest.TestCase):
             graph.insertRelation(rel)
         self.assertIn("FK violation", str(ctx.exception))
         self.assertIn("dst", str(ctx.exception))
-        graph.close()
 
     # -- WEAK NODE --
 
@@ -709,7 +698,6 @@ class TestNeo4jGraph(unittest.TestCase):
         graph.insertNode(child, insert_parent=True)
         self.assertEqual(len(graph.get_node_ids()), 2)
         self.assertEqual(len(graph.get_edges()), 1)
-        graph.close()
 
     @pytest.mark.slow
     def test_contract_weak_node_composite_pk(self) -> None:
@@ -720,7 +708,6 @@ class TestNeo4jGraph(unittest.TestCase):
         graph.insertNode(child, insert_parent=True)
         self.assertIn("id", child._primary_key)
         self.assertIn("sub", child._primary_key)
-        graph.close()
 
     @pytest.mark.slow
     def test_contract_weak_node_propagation_delete(self) -> None:
@@ -739,7 +726,6 @@ class TestNeo4jGraph(unittest.TestCase):
         self.assertTrue(result)
         self.assertEqual(len(graph.get_node_ids()), 0)
         self.assertEqual(len(graph.get_edges()), 0)
-        graph.close()
 
     @pytest.mark.slow
     def test_contract_weak_node_nested_chain(self) -> None:
@@ -752,7 +738,6 @@ class TestNeo4jGraph(unittest.TestCase):
         graph.insertNode(child_weak, insert_parent=True)
         self.assertEqual(len(graph.get_node_ids()), 3)
         self.assertEqual(len(graph.get_edges()), 2)
-        graph.close()
 
     @pytest.mark.slow
     def test_contract_weak_node_nested_delete_cascade(self) -> None:
@@ -766,7 +751,6 @@ class TestNeo4jGraph(unittest.TestCase):
         graph.deleteNode(grandparent, detach=True)
         self.assertEqual(len(graph.get_node_ids()), 2)
         self.assertEqual(len(graph.get_edges()), 1)
-        graph.close()
 
     # -- BULK IMPORT --
 
@@ -782,7 +766,6 @@ class TestNeo4jGraph(unittest.TestCase):
         graph.create(migration)
         self.assertEqual(len(graph.get_node_ids()), 2)
         self.assertEqual(len(graph.get_edges()), 1)
-        graph.close()
 
     # -- CHECK NODE --
 
@@ -793,7 +776,6 @@ class TestNeo4jGraph(unittest.TestCase):
         graph.insertNode(a, replace=True)
         result = graph.checkNode(a)
         self.assertIsNotNone(result)
-        graph.close()
 
     @pytest.mark.slow
     def test_contract_check_node_missing(self) -> None:
@@ -801,7 +783,6 @@ class TestNeo4jGraph(unittest.TestCase):
         a = Node(pk={"id": 999}, main_label="NonExistent")
         result = graph.checkNode(a)
         self.assertIsNone(result)
-        graph.close()
 
     # -- DUPLICATE KEY --
 
@@ -814,16 +795,34 @@ class TestNeo4jGraph(unittest.TestCase):
         with self.assertRaises(RuntimeError) as ctx:
             graph.insertNode(a2, update=False, replace=False)
         self.assertIn("Duplicate key", str(ctx.exception))
-        graph.close()
 
     # -- CLOSE --
 
     @pytest.mark.slow
     def test_contract_close_is_safe(self) -> None:
-        graph = self._make_graph()
-        a = Node(pk={"id": 1}, main_label="TestNode")
-        graph.insertNode(a, replace=True)
-        graph.close()
+        """close() no llança excepcions i deixa el store en estat net.
+
+        Uses its own dedicated connection rather than the class-shared
+        ``cls._graph`` — every other test in this class reuses that shared
+        instance, and calling close() on it would tear down the underlying
+        driver/session for the rest of the suite.
+        """
+        if not self._has_db:
+            self.skipTest("NEO4J_DEV_* (or compatible NEO4J target/plain vars) not set")
+        from cvcdocdb.neo4j_graph import Neo4jGraph
+
+        config = self._load_config()
+        graph = Neo4jGraph(
+            url=config["url"],
+            user=config["user"],
+            password=config["password"],
+            database=config["database"],
+        )
+        try:
+            a = Node(pk={"id": 1}, main_label="TestNode")
+            graph.insertNode(a, replace=True)
+        finally:
+            graph.close()
         self.assertEqual(len(graph.get_node_ids()), 0)
 
     # -- EXPLICIT PK=None --
@@ -834,7 +833,6 @@ class TestNeo4jGraph(unittest.TestCase):
         graph = self._make_graph()
         node = Node(pk=None, main_label="AutoIdNode")
         self.assertIsNone(node._primary_key)
-        graph.close()
 
     @pytest.mark.slow
     def test_contract_explicit_pk_none_assigned_after_insert(self) -> None:
@@ -849,7 +847,6 @@ class TestNeo4jGraph(unittest.TestCase):
         self.assertEqual(node._primary_key["id"], node.neo4j_id)
         # Ara checkNode el pot trobar
         self.assertEqual(graph.checkNode(node), node.neo4j_id)
-        graph.close()
 
     @pytest.mark.slow
     def test_contract_weak_node_no_pk(self) -> None:
@@ -863,7 +860,6 @@ class TestNeo4jGraph(unittest.TestCase):
         self.assertIsNotNone(child_id)
         self.assertNotEqual(parent_id, child_id)
         self.assertEqual(len(graph.get_node_ids()), 2)
-        graph.close()
 
     # -- GET SUBDOCUMENTS --
 
