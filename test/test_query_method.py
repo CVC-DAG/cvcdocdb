@@ -296,6 +296,28 @@ class Neo4jQueryTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.graph.query({"name": "Alice"})
 
+    def test_query_return_node_converts_to_dict_with_properties(self) -> None:
+        """RETURN n must convert the real driver Node into the documented
+        {"labels": [...], "properties": {...}} dict — not the raw
+        neo4j.graph.Node object, which has no `.properties` attribute."""
+        self.graph.query(
+            "CREATE (n:QueryConversionTest {name: 'Alice', age: 30})"
+        )
+        try:
+            result = self.graph.query(
+                "MATCH (n:QueryConversionTest) RETURN n"
+            )
+            self.assertEqual(len(result), 1)
+            node = result[0]["n"]
+            self.assertIsInstance(node, dict)
+            self.assertEqual(node["labels"], ["QueryConversionTest"])
+            self.assertEqual(node["properties"]["name"], "Alice")
+            self.assertEqual(node["properties"]["age"], 30)
+        finally:
+            self.graph.query(
+                "MATCH (n:QueryConversionTest) DETACH DELETE n"
+            )
+
 
 if __name__ == "__main__":
     unittest.main()
