@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-09-21
+
 ### Added
 
 - **Local Neo4j via Docker for the test suite** — `test/conftest.py` now
@@ -15,6 +17,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   no server answers on `NEO4J_DEV_URL`/`NEO4J_URL` and Docker is available,
   falling back to the existing auto-skip otherwise. A `docker-compose.neo4j.yml`
   is also provided for running one manually. See `test/README.md`.
+
+### Fixed
+
+- **`Neo4jGraph._insertNode` treated a valid Neo4j internal node id of `0`
+  as a missing parent** — the WeakNode parent check used
+  `if not self.checkNode(node["parent"])`, and Neo4j's internal ids are
+  0-indexed, so the very first node created after a full DB wipe (id `0`)
+  was incorrectly reported as "missing parent node" even though it had
+  just been inserted correctly. Changed to an explicit `is None` check.
+- **`Neo4jGraph.insertNode(update=False, replace=False)` silently created
+  a duplicate node** instead of refusing the insert when one with the same
+  primary key already existed — unlike `NetworkXGraph`, which already
+  raised `RuntimeError("Duplicate key: ...")` in this case. Two earlier
+  attempts to fix this via a Neo4j `NODE KEY` constraint were reverted
+  (the same `main_label` is reused across callers with different pk
+  shapes, so a DB-level constraint for one shape broke inserts using
+  another); duplicate-key detection is now done in Python instead,
+  mirroring `NetworkXGraph`'s behaviour.
+- **Renamed the obsolete "ADGT"/"XPP" naming** in `Neo4jGraph`'s
+  exception/log messages (and one test class name) to "CVCDocDB".
+
+## [1.0.0a4] - 2026-09-19
+
+### Added
 
 - **Cross-process write locking for `NetworkXGraph`** — every mutating method
   (`insertNode`/`insertRelation`/`deleteNode`/`create_group`/
