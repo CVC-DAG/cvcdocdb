@@ -403,6 +403,38 @@ class TestNetworkXGraph(unittest.TestCase):
         self.assertEqual(graph.checkNode(node), node.neo4j_id)
         graph.close()
 
+    # -- GET DEPENDENCY VALUE (be_value_properties resolution) --
+
+    @pytest.mark.integration
+    def test_contract_get_dependency_value_follows_single_edge(self) -> None:
+        """get_dependency_value segueix l'edge tipat fins al node connectat."""
+        graph = self._make_graph()
+        person = Node(pk={"id": 1}, main_label="TestNode")
+        valor = Node(pk={"name": "oriol"}, main_label="Valor")
+        graph.insertNode(person, replace=True)
+        graph.insertNode(valor, replace=True)
+        graph.insertRelation(Relation(person, valor, "NOM"))
+        self.assertEqual(
+            graph.get_dependency_value(person.neo4j_id, "NOM"), "oriol"
+        )
+        graph.close()
+
+    @pytest.mark.integration
+    def test_contract_get_dependency_value_missing_edge_returns_none(self) -> None:
+        """get_dependency_value retorna None si no hi ha edge d'aquest tipus."""
+        graph = self._make_graph()
+        person = Node(pk={"id": 1}, main_label="TestNode")
+        graph.insertNode(person, replace=True)
+        self.assertIsNone(graph.get_dependency_value(person.neo4j_id, "NOM"))
+        graph.close()
+
+    @pytest.mark.integration
+    def test_contract_get_dependency_value_missing_node_returns_none(self) -> None:
+        """get_dependency_value retorna None per a un node inexistent."""
+        graph = self._make_graph()
+        self.assertIsNone(graph.get_dependency_value(999999, "NOM"))
+        graph.close()
+
 
 class TestNeo4jGraph(unittest.TestCase):
     """Contract tests for Neo4jGraph.
@@ -788,4 +820,27 @@ class TestNeo4jGraph(unittest.TestCase):
         self.assertIsNotNone(child_id)
         self.assertNotEqual(parent_id, child_id)
         self.assertEqual(len(graph.get_node_ids()), 2)
+
+    # -- GET DEPENDENCY VALUE (be_value_properties resolution) --
+
+    @pytest.mark.slow
+    def test_contract_get_dependency_value_follows_single_edge(self) -> None:
+        """get_dependency_value segueix l'edge tipat fins al node connectat."""
+        graph = self._make_graph()
+        person = Node(pk={"id": 1}, main_label="TestNode")
+        valor = Node(pk={"name": "oriol"}, main_label="Valor")
+        graph.insertNode(person, replace=True)
+        graph.insertNode(valor, replace=True)
+        graph.insertRelation(Relation(person, valor, "NOM"))
+        self.assertEqual(
+            graph.get_dependency_value(person.neo4j_id, "NOM"), "oriol"
+        )
+
+    @pytest.mark.slow
+    def test_contract_get_dependency_value_missing_edge_returns_none(self) -> None:
+        """get_dependency_value retorna None si no hi ha edge d'aquest tipus."""
+        graph = self._make_graph()
+        person = Node(pk={"id": 1}, main_label="TestNode")
+        graph.insertNode(person, replace=True)
+        self.assertIsNone(graph.get_dependency_value(person.neo4j_id, "NOM"))
 

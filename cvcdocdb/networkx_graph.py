@@ -384,6 +384,21 @@ class NetworkXGraph(GraphStore):
         """
         return self._edge_attrs.get((u, v, key))
 
+    def get_dependency_value(self, node_id: int, relation_type: str) -> Optional[str]:
+        """Return the ``name`` pk of the node reachable via a single
+        outgoing *relation_type* edge from *node_id*.
+
+        Single hop over ``self._graph[node_id]`` — never scans the whole
+        graph, regardless of graph size.
+        """
+        if not self._graph.has_node(node_id):
+            return None
+        for dst_id, edges in self._graph[node_id].items():
+            for edge_key in edges:
+                if edge_key == relation_type:
+                    return self._node_attrs.get(dst_id, {}).get("name")
+        return None
+
     def find_nodes_by_property(self, prop_name: str, value: Any) -> List[int]:
         """Return node ids indexed by an exact property value match."""
         idx_key = (prop_name, self._normalize_index_value(value))

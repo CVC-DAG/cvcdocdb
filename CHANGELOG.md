@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`Node.get_attrs(store)`** — retrieves a node's attributes from a
+  `GraphStore` and, when the node's Python class declares a non-empty
+  `be_value_properties` (e.g. `IndividuPadro.be_value_properties = ("nom",
+  "cognom1", "cognom2")`), automatically resolves each property from its
+  connected `Atribut`/`Valor` node and merges it into the returned dict.
+  A plain `Node`/`WeakNode` (no `be_value_properties`) is returned
+  unchanged, with no extra lookups. Previously, retrieving a node's
+  attributes (`get_node_attrs`, a Cypher query, ...) never included these
+  value properties — you had to manually traverse the `NOM`/`COGNOM1`/...
+  edges to the `Valor` nodes yourself.
+- **`GraphStore.get_dependency_value(node_id, relation_type)`** — new
+  single-hop lookup (implemented in both `NetworkXGraph` and `Neo4jGraph`)
+  that follows one outgoing typed edge and returns the connected node's
+  `name` property. Powers `Node.get_attrs`'s value-property resolution
+  without ever scanning the whole graph.
+- **`be_value_properties` now works on `WeakNode` subclasses, not just
+  `Individu`** — the auto-materialisation of `be_value_properties` into
+  `Atribut` dependencies (previously hardcoded in `Individu.__init__`) was
+  generalised into `Node.__init__` itself, so any `Node` or `WeakNode`
+  subclass that declares `be_value_properties` gets the same behaviour for
+  free at insertion time, and `Individu.__init__` was simplified to rely
+  on it instead of duplicating the logic.
+
 ## [1.0.0] - 2026-09-21
 
 ### Added
