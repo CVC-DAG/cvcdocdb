@@ -291,10 +291,77 @@ class Neo4jQueryTest(unittest.TestCase):
         )
         self.assertIsInstance(result, list)
 
-    def test_query_dict_raises_value_error(self) -> None:
-        """Neo4jGraph.query() should reject dict filters."""
+    def test_query_dict_filter_returns_networkx_compatible_shape(self) -> None:
+        """Neo4jGraph.query() must accept the same MongoDB-style dict
+        filters as NetworkXGraph.query() — the two backends are meant to
+        be interchangeable without client code changes. Previously this
+        raised ValueError unconditionally."""
+        self.graph.query(
+            "CREATE (n:QueryDictFilterTest {name: 'Alice', age: 30})"
+        )
+        try:
+            result = self.graph.query({"main_label": "QueryDictFilterTest", "name": "Alice"})
+            self.assertEqual(len(result), 1)
+            self.assertEqual(result[0]["main_label"], "QueryDictFilterTest")
+            self.assertEqual(result[0]["properties"]["name"], "Alice")
+            self.assertEqual(result[0]["properties"]["age"], 30)
+            self.assertIsInstance(result[0]["node_id"], int)
+        finally:
+            self.graph.query(
+                "MATCH (n:QueryDictFilterTest) DETACH DELETE n"
+            )
+
+    def test_query_dict_filter_operators_and_main_label(self) -> None:
+        """Operators ($gt/$in/$ne/$exists/$or) and main_label filtering
+        (tested against the real Neo4j label, not a property) all work."""
+        self.graph.query(
+            "CREATE (n:QueryDictFilterOpsTest {name: 'Bob', age: 40})"
+        )
+        try:
+            self.assertEqual(
+                len(self.graph.query({"main_label": "QueryDictFilterOpsTest", "age": {"$gt": 30}})), 1
+            )
+            self.assertEqual(
+                len(self.graph.query({"main_label": "QueryDictFilterOpsTest", "age": {"$lt": 30}})), 0
+            )
+            self.assertEqual(
+                len(self.graph.query({"main_label": {"$in": ["QueryDictFilterOpsTest", "Nope"]}})), 1
+            )
+            self.assertEqual(
+                len(self.graph.query({"main_label": "QueryDictFilterOpsTest", "age": {"$exists": True}})), 1
+            )
+            self.assertEqual(
+                len(self.graph.query({
+                    "$or": [
+                        {"main_label": "QueryDictFilterOpsTest", "name": "Bob"},
+                        {"main_label": "QueryDictFilterOpsTest", "name": "Nobody"},
+                    ]
+                })), 1
+            )
+        finally:
+            self.graph.query(
+                "MATCH (n:QueryDictFilterOpsTest) DETACH DELETE n"
+            )
+
+    def test_query_dict_filter_unknown_operator_raises(self) -> None:
         with self.assertRaises(ValueError):
-            self.graph.query({"name": "Alice"})
+            self.graph.query({"age": {"$bogus": 1}})
+
+    def test_query_dict_filter_projection_and_limit(self) -> None:
+        self.graph.query(
+            "CREATE (n:QueryDictFilterProjTest {name: 'Carol', age: 50})"
+        )
+        try:
+            result = self.graph.query(
+                {"main_label": "QueryDictFilterProjTest"}, projection={"name": 1},
+            )
+            self.assertEqual(result[0]["properties"], {"name": "Carol"})
+            result = self.graph.query({}, limit_val=1)
+            self.assertEqual(len(result), 1)
+        finally:
+            self.graph.query(
+                "MATCH (n:QueryDictFilterProjTest) DETACH DELETE n"
+            )
 
     def test_query_return_node_converts_to_dict_with_properties(self) -> None:
         """RETURN n must convert the real driver Node into the documented

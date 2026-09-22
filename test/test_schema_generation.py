@@ -162,6 +162,18 @@ class NetworkXSchemaTest(unittest.TestCase):
         self.assertIn("LivesIn", result)
         self.assertIn("Rules", result)
 
+    def test_schema_yaml_contains_relationship_properties(self) -> None:
+        """Schema YAML contains properties stored on edges, not just nodes.
+
+        KNOWS carries `strength`, RULES carries `since` — these live only
+        in self._edge_attrs, never mirrored onto the raw networkx graph
+        edge, so a naive read of the graph's own edge data would miss
+        them entirely.
+        """
+        result = self.graph.schema_yaml("got")
+        self.assertIn("strength", result)
+        self.assertIn("since", result)
+
     def test_schema_yaml_empty_graph(self) -> None:
         """Schema YAML for an empty graph has empty labels/relationships."""
         tmp = tempfile.mkdtemp()
@@ -209,6 +221,10 @@ class Neo4jSchemaTest(unittest.TestCase):
     def setUp(self) -> None:
         if self.graph is None:
             self.skipTest("Neo4j not available")
+        self.graph._tx = self.graph._session.begin_transaction()
+        self.graph._tx.run("MATCH (n) DETACH DELETE n")
+        self.graph._tx.commit()
+        self.graph._tx = None
 
     def test_schema_yaml_returns_string(self) -> None:
         result = self.graph.schema_yaml("got")
@@ -222,6 +238,49 @@ class Neo4jSchemaTest(unittest.TestCase):
         self.assertIsInstance(data, dict)
         self.assertIn("labels", data)
         self.assertIn("relationships", data)
+
+    def test_schema_yaml_relationship_src_dst_are_real_labels(self) -> None:
+        """src/dst must be the endpoints' real main_label, not always 'Node'.
+
+        The old code read sample["a"].get("labels", ("Node",))[0], which
+        looks up a *property* literally named "labels" on the raw driver
+        Node (never present on real data) instead of its real .labels
+        attribute — so this always silently fell back to "Node".
+        """
+        if yaml is None:
+            self.skipTest("PyYAML not installed")
+        self.graph.insertNode(Node(pk={"name": "Jon Snow"}, main_label="Character"), replace=True)
+        self.graph.insertNode(Node(pk={"name": "Winterfell"}, main_label="Location"), replace=True)
+        self.graph.insertRelation(Relation(
+            Node(pk={"name": "Jon Snow"}, main_label="Character"),
+            Node(pk={"name": "Winterfell"}, main_label="Location"),
+            "LIVES_IN",
+        ), update=True)
+
+        result = self.graph.schema_yaml("got")
+        data = yaml.safe_load(result)
+        rel = data["relationships"]["LIVES_IN"]
+        self.assertEqual(rel["src"], "Character")
+        self.assertEqual(rel["dst"], "Location")
+
+    def test_schema_yaml_primary_key_is_not_an_arbitrary_guess(self) -> None:
+        """Neo4j never persists which properties are the real pk (see
+        migrate()'s docstring) — the old code guessed the first two
+        property names in iteration order (pk_fields[:2]), which is
+        arbitrary and wrong. Using every property is at least honest and
+        consistent with migrate()'s documented fallback.
+        """
+        if yaml is None:
+            self.skipTest("PyYAML not installed")
+        self.graph.insertNode(
+            Node(pk={"member_id": 1}, main_label="KarateMember", club="Mr. Hi", extra="z"),
+            replace=True,
+        )
+
+        result = self.graph.schema_yaml("got")
+        data = yaml.safe_load(result)
+        pk_fields = set(data["labels"]["KarateMember"]["primary_key"])
+        self.assertEqual(pk_fields, {"member_id", "club", "extra"})
 
 
 if __name__ == "__main__":
