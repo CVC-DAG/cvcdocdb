@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 import os
 
 NAME = "cvcdocdb"
-VERSION = "1.2.0"
+VERSION = "0.0.0.dev0"  # real version numbers only live on `main` — see CLAUDE.md branch strategy
 DESCR = "Graph-based document representation library with Neo4j and NetworkX backends"
 URL = "https://github.com/CVC-DAG/cvcdocdb"
 AUTHOR = "Oriol Ramos Terrades"
