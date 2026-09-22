@@ -5,7 +5,7 @@ cvcdocdb (Document Representation Model) is a Python library for graph-based
 document representation with Neo4j and an in-memory NetworkX backend.
 
 .. toctree::
-   :maxdepth: 2
+   :maxdepth: 1
    :caption: Contents:
 
    tutorials/index
