@@ -234,6 +234,16 @@ class GraphStore(ABC):
             f"Vector indexing is not supported by {self.__class__.__name__}."
         )
 
+    def list_vector_indexes(self) -> List[Dict[str, Any]]:
+        """Return metadata for every enabled vector index, as
+        ``[{"property_name": ..., "dimensions": ..., "space": ...}, ...]``.
+
+        Used by :func:`cvcdocdb.migration.migrate` to recreate vector
+        indexes on a target backend. Backends without vector index
+        support (the default) return an empty list.
+        """
+        return []
+
     # ------------------------------------------------------------------
     # Query helpers (concrete default — may be overridden)
     # ------------------------------------------------------------------
