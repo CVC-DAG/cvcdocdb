@@ -1309,12 +1309,14 @@ class Neo4jGraph:
                 f"MATCH (a)-[r:`{rel_type}`]->(b) RETURN a, r, b LIMIT 1"
             ).single()
             if sample:
-                for k in sample["a"]:
-                    if k not in ("element_id",):
-                        src_labels.add(sample["a"].get("labels", ("Node",))[0])
-                for k in sample["b"]:
-                    if k not in ("element_id",):
-                        dst_labels.add(sample["b"].get("labels", ("Node",))[0])
+                # .labels is the real driver Node attribute (a frozenset);
+                # .get("labels", ...) would look up a *property* named
+                # "labels" instead, which real data never has, so it always
+                # fell back to the default "Node".
+                a_labels = list(sample["a"].labels)
+                src_labels.add(a_labels[0] if a_labels else "Node")
+                b_labels = list(sample["b"].labels)
+                dst_labels.add(b_labels[0] if b_labels else "Node")
                 for k, v in sample["r"].items():
                     if k not in ("element_id",):
                         props[k] = self._python_type(v)
@@ -1339,8 +1341,16 @@ class Neo4jGraph:
                 info = label_results[label]
                 props = info["properties"]
                 count = info["count"]
-                pk_fields = [k for k in props if k not in ("pk", "main_label", "labels")]
-                pk_str = f"[{', '.join(repr(f) for f in pk_fields[:2])}]" if pk_fields else "[]"
+                # Neo4j never persists which properties form the real pk
+                # (a purely client-side concept applied at insert time —
+                # see Node.get_attrs()'s docstring). Every property is
+                # used here instead of guessing at a slice of them, which
+                # is honest about that limitation rather than arbitrarily
+                # wrong (the previous code took pk_fields[:2] — literally
+                # "the first two properties found", regardless of whether
+                # they were actually part of the pk).
+                pk_fields = list(props)
+                pk_str = f"[{', '.join(repr(f) for f in pk_fields)}]" if pk_fields else "[]"
 
                 lines.append(f"  {label}:")
                 lines.append(f"    class_name: {label[0].upper() + label[1:] if label else 'Node'}")

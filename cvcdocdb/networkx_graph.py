@@ -690,11 +690,14 @@ class NetworkXGraph(GraphStore):
             rel_types[rel_type]["src"].add(src_label)
             rel_types[rel_type]["dst"].add(dst_label)
 
-            # Collect edge properties
-            for k, val in data.items():
-                if k not in ("rel_type", "rel_type"):
-                    if k not in rel_types[rel_type]["props"]:
-                        rel_types[rel_type]["props"][k] = self._python_type(val)
+            # Collect edge properties — these live only in self._edge_attrs,
+            # never mirrored onto the raw networkx graph edge itself (see
+            # insertRelation, which only ever sets rel_type there), so
+            # `data` (the graph's own edge dict) is never enough.
+            edge_attrs = self._edge_attrs.get((u, v, rel_type), {})
+            for k, val in edge_attrs.items():
+                if k not in rel_types[rel_type]["props"]:
+                    rel_types[rel_type]["props"][k] = self._python_type(val)
 
         # ── Build YAML manually (no PyYAML dependency) ───────────────
         lines: List[str] = []
