@@ -7,6 +7,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-09-22
+
+### Added
+
+- **`cvcdocdb.migration.migrate(source, target, ...)`** — generic
+  backend-to-backend graph migration (e.g. `NetworkXGraph` ↔
+  `Neo4jGraph`), in three phases: nodes, then edges, then vector
+  indexes. Works between any two `GraphStore` implementations using
+  only the common interface — it doesn't know about `WeakNode`,
+  `Individu`/`be_value_properties`, or any other Python-level entity
+  class.
+  - Matches nodes by `(main_label, pk)`; falls back to using every
+    property as the pk when the source can't tell which properties
+    form it (Neo4j never persists that distinction — see below).
+  - Reads/writes in configurable chunks, with a batched round-trip path
+    for a `Neo4jGraph` source/target instead of one query per
+    node/edge.
+  - Optional `label_filter`/`property_filter` (same MongoDB-style
+    syntax as `GraphDataset`); an edge is migrated only if both
+    endpoints were kept.
+  - `update`/`replace` conflict handling on the target (idempotent
+    re-runs by default); `on_error="raise"|"skip"` for a best-effort
+    migration of a large, possibly messy graph.
+  - Verified end-to-end against a real Neo4j with the Karate Club
+    dataset in both directions, including a full node/edge
+    property-by-property diff (no property added or lost).
+- **`Neo4jGraph.get_node_attrs(node_id)`** — was missing entirely
+  (silently inherited a no-op default), so a generic caller (like
+  `migrate()`) could not read a Neo4j node's attributes at all. Always
+  reports `pk=None`, since Neo4j doesn't persist which properties form
+  a node's primary key.
+- **`Neo4jGraph.batch()`** — a context manager that groups multiple
+  `insertNode`/`insertRelation` calls into a single transaction
+  (committing once instead of once per call), for bulk writes.
+- **`GraphStore.list_vector_indexes()`** (and `NetworkXGraph`/
+  `Neo4jGraph` implementations) — introspects enabled vector (ANN)
+  indexes, so `migrate()` can recreate them on the target.
+
+### Fixed
+
+- **`NetworkXGraph.get_node_pks()` always returned `main_label=''`** —
+  it read the label from the raw networkx node's own attribute dict,
+  but `main_label`/`labels` are only ever stored in the separate
+  `self._node_attrs` tracking dict. Undetected because every existing
+  caller only checked the returned `pk`, never `main_label`. Fixed to
+  read from `self._node_attrs`, like `get_node_attrs()` already does.
+- **`Neo4jGraph.enable_vector_index()`/`query_vector_index()`** used
+  the parameter name `name` instead of `property_name` like
+  `GraphStore` and `NetworkXGraph` — a caller passing the documented
+  keyword name got a `TypeError` instead of the intended
+  `NotImplementedError`. Renamed for consistency.
+
 ## [1.1.0] - 2026-09-22
 
 ### Added

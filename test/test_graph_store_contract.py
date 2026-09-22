@@ -333,6 +333,16 @@ class TestNetworkXGraph(unittest.TestCase):
     # -- CHECK NODE --
 
     @pytest.mark.integration
+    def test_contract_get_node_pks_includes_main_label(self) -> None:
+        """get_node_pks retorna el main_label real de cada node, no ''."""
+        graph = self._make_graph()
+        graph.insertNode(Node(pk={"id": 1}, main_label="Document"), replace=True)
+        graph.insertNode(Node(pk={"id": 2}, main_label="Author"), replace=True)
+        pks_by_label = {p["main_label"]: p["pk"] for p in graph.get_node_pks()}
+        self.assertEqual(pks_by_label, {"Document": {"id": 1}, "Author": {"id": 2}})
+        graph.close()
+
+    @pytest.mark.integration
     def test_contract_check_node_exists(self) -> None:
         """checkNode troba un node que existeix."""
         graph = self._make_graph()
@@ -798,6 +808,17 @@ class TestNeo4jGraph(unittest.TestCase):
         self.assertEqual(len(graph.get_node_ids()), 2)
         self.assertEqual(len(graph.get_edges()), 1)
 
+    # -- GET NODE PKS --
+
+    @pytest.mark.slow
+    def test_contract_get_node_pks_includes_main_label(self) -> None:
+        """get_node_pks retorna el main_label real de cada node, no ''."""
+        graph = self._make_graph()
+        graph.insertNode(Node(pk={"id": 1}, main_label="Document"), replace=True)
+        graph.insertNode(Node(pk={"id": 2}, main_label="Author"), replace=True)
+        pks_by_label = {p["main_label"]: p["pk"] for p in graph.get_node_pks()}
+        self.assertEqual(pks_by_label, {"Document": {"id": 1}, "Author": {"id": 2}})
+
     # -- CHECK NODE --
 
     @pytest.mark.slow
@@ -986,4 +1007,53 @@ class TestNeo4jGraph(unittest.TestCase):
         person = Node(pk={"id": 1}, main_label="TestNode")
         graph.insertNode(person, replace=True)
         self.assertIsNone(graph.get_dependency_value(person.neo4j_id, "NOM"))
+
+    # -- GET NODE ATTRS (pk is always None on Neo4j — see migration.py) --
+
+    @pytest.mark.slow
+    def test_contract_get_node_attrs_returns_properties_and_pk_none(self) -> None:
+        """get_node_attrs retorna main_label/labels/props, però pk=None."""
+        graph = self._make_graph()
+        node = Node(pk={"id": 1}, main_label="TestNode", score=1.5)
+        node_id = graph.insertNode(node, replace=True)
+        attrs = graph.get_node_attrs(node_id)
+        self.assertIsNotNone(attrs)
+        self.assertIsNone(attrs["pk"])
+        self.assertEqual(attrs["main_label"], "TestNode")
+        self.assertIn("TestNode", attrs["labels"])
+        self.assertEqual(attrs["score"], 1.5)
+        self.assertEqual(attrs["id"], 1)
+
+    @pytest.mark.slow
+    def test_contract_get_node_attrs_missing_node_returns_none(self) -> None:
+        """get_node_attrs retorna None per a un node inexistent."""
+        graph = self._make_graph()
+        self.assertIsNone(graph.get_node_attrs(999999))
+
+    # -- BATCH (transaction grouping) --
+
+    @pytest.mark.slow
+    def test_contract_batch_groups_writes_in_one_transaction(self) -> None:
+        """Dins de batch(), insertNode reutilitza la mateixa transacció."""
+        graph = self._make_graph()
+        with graph.batch():
+            a = Node(pk={"id": 1}, main_label="TestNode")
+            b = Node(pk={"id": 2}, main_label="TestNode")
+            graph.insertNode(a, replace=True)
+            graph.insertNode(b, replace=True)
+            # Encara dins del bloc: la transacció és oberta pel batch().
+            self.assertIsNotNone(graph._tx)
+        # Un cop tancat el bloc, s'ha comés i no queda transacció oberta.
+        self.assertIsNone(graph._tx)
+        self.assertEqual(len(graph.get_node_ids()), 2)
+
+    @pytest.mark.slow
+    def test_contract_batch_rolls_back_on_error(self) -> None:
+        """Si el bloc batch() llança, es fa rollback i no es persisteix res."""
+        graph = self._make_graph()
+        with self.assertRaises(RuntimeError):
+            with graph.batch():
+                graph.insertNode(Node(pk={"id": 1}, main_label="TestNode"), replace=True)
+                raise RuntimeError("boom")
+        self.assertEqual(len(graph.get_node_ids()), 0)
 

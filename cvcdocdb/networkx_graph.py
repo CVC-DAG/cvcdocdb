@@ -348,8 +348,12 @@ class NetworkXGraph(GraphStore):
         result = []
         for nid, pk in self._node_pks.items():
             if nid in self._graph.nodes:
-                node = self._graph.nodes[nid]
-                label = node.get("main_label", "")
+                # main_label/labels are only ever stored in _node_attrs,
+                # never mirrored onto the raw networkx node's own attribute
+                # dict (see _ensure_node_inserted's self._graph.add_node
+                # call, which only passes pk + regular attributes) — so it
+                # must be read from there, not self._graph.nodes[nid].
+                label = self._node_attrs.get(nid, {}).get("main_label", "")
                 result.append({"main_label": label, "pk": pk})
         return result
 
@@ -1132,6 +1136,19 @@ class NetworkXGraph(GraphStore):
             if node_id is not None:
                 results.append((node_id, float(dist)))
         return results
+
+    def list_vector_indexes(self) -> List[Dict[str, Any]]:
+        """Return metadata for every enabled vector index."""
+        return [
+            {
+                "property_name": name,
+                "dimensions": meta["dimensions"],
+                "space": meta["space"],
+                "ef_construction": meta.get("ef_construction", 200),
+                "m": meta.get("m", 16),
+            }
+            for name, meta in self._vector_index_meta.items()
+        ]
 
     # ------------------------------------------------------------------
     # Protected helpers: node operations
