@@ -817,11 +817,13 @@ def to_hetero_edge_index_dict(
             (elimina el N+1).
 
     Returns:
-        edge_index_dict: ``{(src_type, rel_type, dst_type): LongTensor[2, E]}``
-        num_nodes_dict: ``{node_type: nombre de nodes}``
-        node_maps: ``{node_type: {id_original: índex_local}}`` — per
-            recuperar els ids originals del store a partir dels índexs
-            locals usats a ``edge_index_dict``.
+        Tuple ``(edge_index_dict, num_nodes_dict, node_maps)``:
+
+        * ``edge_index_dict``: ``{(src_type, rel_type, dst_type): LongTensor[2, E]}``
+        * ``num_nodes_dict``: ``{node_type: nombre de nodes}``
+        * ``node_maps``: ``{node_type: {id_original: índex_local}}`` — per
+          recuperar els ids originals del store a partir dels índexs
+          locals usats a ``edge_index_dict``.
 
     Example::
 
