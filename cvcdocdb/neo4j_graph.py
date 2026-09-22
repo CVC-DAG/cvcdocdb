@@ -323,19 +323,7 @@ class Neo4jGraph:
                 # print(node)
                 self._tx.commit()
         except ConstraintError as err:
-            try:
-                self._tx.rollback()
-            except Exception:
-                pass
-            try:
-                self._tx.close()
-            except Exception:
-                pass
-            self._tx = None
-            raise RuntimeError("Duplicate key: " + err.message) from err
-        except TransactionError as err:
-            msg = str(err)
-            if "Duplicate key" in msg or "NODE KEY" in msg or "Transaction failed" in msg or "ConstraintValidationFailed" in msg:
+            if inici:
                 try:
                     self._tx.rollback()
                 except Exception:
@@ -345,17 +333,26 @@ class Neo4jGraph:
                 except Exception:
                     pass
                 self._tx = None
+            raise RuntimeError("Duplicate key: " + err.message) from err
+        except TransactionError as err:
+            msg = str(err)
+            is_duplicate = (
+                "Duplicate key" in msg or "NODE KEY" in msg
+                or "Transaction failed" in msg or "ConstraintValidationFailed" in msg
+            )
+            if inici:
+                try:
+                    self._tx.rollback()
+                except Exception:
+                    pass
+                try:
+                    self._tx.close()
+                except Exception:
+                    pass
+                self._tx = None
+            if is_duplicate:
                 raise RuntimeError("Duplicate key: " + msg) from err
             print(err)
-            try:
-                self._tx.rollback()
-            except Exception:
-                pass
-            try:
-                self._tx.close()
-            except Exception:
-                pass
-            self._tx = None
             raise
         finally:
             if inici and self._tx is not None:
@@ -468,7 +465,11 @@ class Neo4jGraph:
             return False
         except TransactionError as err:
             msg = str(err)
-            if "Duplicate key" in msg or "NODE KEY" in msg or "Transaction failed" in msg or "ConstraintValidationFailed" in msg:
+            is_duplicate = (
+                "Duplicate key" in msg or "NODE KEY" in msg
+                or "Transaction failed" in msg or "ConstraintValidationFailed" in msg
+            )
+            if inici:
                 try:
                     self._tx.rollback()
                 except Exception:
@@ -477,10 +478,9 @@ class Neo4jGraph:
                     self._tx.close()
                 except Exception:
                     pass
+            if is_duplicate:
                 raise RuntimeError("Duplicate key: " + msg) from err
             print(err)
-            self._tx.rollback()
-            self._tx.close()
             raise
         else:
             if inici:
@@ -527,9 +527,10 @@ class Neo4jGraph:
                 )
             except TransactionError as err:
                 print(err)
-                self._tx.rollback()
-                self._tx.close()
-                self._tx = None
+                if inici:
+                    self._tx.rollback()
+                    self._tx.close()
+                    self._tx = None
                 raise
             else:
                 if inici:
@@ -625,9 +626,10 @@ class Neo4jGraph:
             raise
         except TransactionError as err:
             print(err)
-            self._tx.rollback()
-            self._tx.close()
-            self._tx = None
+            if inici:
+                self._tx.rollback()
+                self._tx.close()
+                self._tx = None
             raise
         else:
             if inici:
@@ -678,7 +680,8 @@ class Neo4jGraph:
         """Return all internal node ids in the graph."""
         if self._closed:
             return []
-        result = self._session.run("MATCH (n) RETURN id(n) AS nid")
+        runner = self._tx if self._tx is not None else self._session
+        result = runner.run("MATCH (n) RETURN id(n) AS nid")
         return [record["nid"] for record in result]
 
     def get_nodes(self) -> List[int]:
@@ -727,18 +730,28 @@ class Neo4jGraph:
         }
 
     @contextmanager
-    def batch(self) -> Iterator[None]:
-        """Group multiple ``insertNode``/``insertRelation`` calls into a
-        single Neo4j transaction, committing once at the end instead of
-        once per call — substantially faster for bulk writes (see
-        :func:`cvcdocdb.migration.migrate`).
+    def batch(self, write: bool = True) -> Iterator[None]:
+        """Group multiple calls into a single Neo4j transaction, committing
+        once at the end instead of once per call — substantially faster
+        for bulk writes (see :func:`cvcdocdb.migration.migrate`).
 
         ``insertNode``/``insertRelation`` already reuse ``self._tx`` when
         one is open instead of starting their own (see the ``inici`` /
-        nested-parent-insert handling above); this just opens that same
-        transaction from the outside and commits/rolls back once for the
-        whole block. Nesting is safe — an inner ``batch()`` call while one
-        is already open is a no-op.
+        nested-parent-insert handling above), and :meth:`query`/
+        :meth:`get_node_ids` do the same, so plain reads made inside this
+        block run in the same transaction too — giving a consistent
+        snapshot for the whole block instead of one read-committed view
+        per call. This just opens that transaction from the outside and
+        commits/rolls back once for the whole block. Nesting is safe — an
+        inner ``batch()`` call while one is already open is a no-op.
+
+        Args:
+            write: Accepted for interface symmetry with
+                ``NetworkXGraph.batch()`` (which uses it to skip an
+                unnecessary resave when the block is read-only). Neo4j has
+                no equivalent distinction worth making here — committing a
+                transaction that made no writes is a no-op — so this is
+                ignored.
         """
         if self._tx is not None:
             yield
@@ -867,7 +880,8 @@ class Neo4jGraph:
         if isinstance(filter_dict, dict) or filter_dict is None:
             return self._query_dict(filter_dict or {}, projection, sort, limit_val)
 
-        result = self._session.run(
+        runner = self._tx if self._tx is not None else self._session
+        result = runner.run(
             filter_dict or "", parameters=params or {}
         )
         records: List[Dict[str, Any]] = []
@@ -900,7 +914,8 @@ class Neo4jGraph:
             bound_params["__limit"] = limit_val
             cypher += " LIMIT $__limit"
 
-        result = self._session.run(cypher, parameters=bound_params)
+        runner = self._tx if self._tx is not None else self._session
+        result = runner.run(cypher, parameters=bound_params)
 
         records: List[Dict[str, Any]] = []
         for record in result:

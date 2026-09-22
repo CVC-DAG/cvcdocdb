@@ -86,6 +86,34 @@ def migrate(
     delete behaves the same on *target* even though migration itself
     never constructs a ``WeakNode``.
 
+    **Locking**: the whole migration — all three phases — runs under a
+    single write lock held on *both* *source* and *target* for the
+    entire duration, not one lock per phase. It's a write lock, not an
+    exclusive lock: concurrent *reads* of either store (by other
+    processes/instances/threads) are never blocked, only concurrent
+    *writes* are, so the migration is never torn by another writer
+    mutating either store mid-flight, while readers keep seeing a
+    consistent view throughout (the state as of just before the
+    migration started, until it completes and its own writes land).
+    Backend-specific granularity:
+
+    * ``NetworkXGraph``: the existing cross-process file lock (see
+      ``NetworkXGraph.batch()``/``_guarded_write()``), held for the
+      whole function. Other mutating calls on the same
+      ``persistence_path`` (any process) block until migration
+      finishes; reads never touch this lock and are unaffected.
+    * ``Neo4jGraph``: a single explicit transaction spanning the whole
+      function (see ``Neo4jGraph.batch()``). Neo4j has no literal
+      whole-database lock, so this is the closest honest
+      approximation — row/relationship locks are taken as the
+      transaction touches them, escalating in practice to the whole
+      migrated subgraph for its duration, but it is not a database-wide
+      exclusive lock at the server level. For a very large graph this
+      also means the transaction accumulates a correspondingly large
+      amount of uncommitted work before the single commit at the end;
+      that's the direct cost of "one lock for the whole migration"
+      instead of the previous per-phase commits.
+
     **Constraints/indexes**: this project deliberately does not create
     Neo4j-side ``NODE KEY``/uniqueness constraints (the same
     ``main_label`` can be used with different pk shapes by different
@@ -136,11 +164,15 @@ def migrate(
     props_filter = property_filter or {}
     stats = MigrationStats()
 
-    # -- Phase 1: nodes -----------------------------------------------
-    identities: Dict[Any, Tuple[str, Dict[str, Any]]] = {}
-    node_ids = source.get_node_ids()
+    # One write lock per store, held for all three phases below (see the
+    # "Locking" section in this function's docstring). `source` is only
+    # ever read here, so its lock is acquired write=False (still blocks
+    # concurrent writers, skips the pointless resave on exit).
+    with _maybe_batch(source, write=False), _maybe_batch(target, write=True):
+        # -- Phase 1: nodes ---------------------------------------------
+        identities: Dict[Any, Tuple[str, Dict[str, Any]]] = {}
+        node_ids = source.get_node_ids()
 
-    with _maybe_batch(target):
         for i in range(0, len(node_ids), chunk_size):
             chunk = node_ids[i:i + chunk_size]
             for old_id, attrs in _iter_node_attrs(source, chunk):
@@ -173,8 +205,7 @@ def migrate(
                 identities[old_id] = (main_label, pk)
                 stats.nodes_migrated += 1
 
-    # -- Phase 2: edges -------------------------------------------------
-    with _maybe_batch(target):
+        # -- Phase 2: edges -----------------------------------------------
         for chunk_num, (src_id, dst_id, rel_type, edge_attrs) in enumerate(
             _iter_edges_with_attrs(source, chunk_size)
         ):
@@ -198,18 +229,18 @@ def migrate(
                 continue
             stats.edges_migrated += 1
 
-    # -- Phase 3: vector indexes ----------------------------------------
-    for index_meta in source.list_vector_indexes():
-        try:
-            target.enable_vector_index(**index_meta)
-            stats.indexes_migrated += 1
-        except NotImplementedError:
-            stats.indexes_skipped += 1
-        except Exception as exc:  # noqa: BLE001
-            if on_error == "raise":
-                raise
-            stats.errors.append(f"vector index {index_meta.get('property_name')}: {exc}")
-            stats.indexes_skipped += 1
+        # -- Phase 3: vector indexes ---------------------------------------
+        for index_meta in source.list_vector_indexes():
+            try:
+                target.enable_vector_index(**index_meta)
+                stats.indexes_migrated += 1
+            except NotImplementedError:
+                stats.indexes_skipped += 1
+            except Exception as exc:  # noqa: BLE001
+                if on_error == "raise":
+                    raise
+                stats.errors.append(f"vector index {index_meta.get('property_name')}: {exc}")
+                stats.indexes_skipped += 1
 
     return stats
 
@@ -239,12 +270,15 @@ def _split_node_attrs(
     return main_label, pk, props
 
 
-def _maybe_batch(store: GraphStore):
-    """Use *store*'s ``batch()`` transaction-grouping context manager if it
-    has one (currently ``Neo4jGraph``); a no-op context otherwise."""
+def _maybe_batch(store: GraphStore, write: bool = True):
+    """Use *store*'s ``batch()`` write-lock/transaction context manager if
+    it has one (``NetworkXGraph``, ``Neo4jGraph``); a no-op context
+    otherwise. *write* is forwarded to ``batch()`` — pass ``False`` when
+    *store* is only being read inside the block (see ``migrate()``'s
+    "Locking" docstring section)."""
     batch = getattr(store, "batch", None)
     if callable(batch):
-        return batch()
+        return batch(write=write)
     return _null_context()
 
 

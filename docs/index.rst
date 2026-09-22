@@ -5,16 +5,19 @@ cvcdocdb (Document Representation Model) is a Python library for graph-based
 document representation with Neo4j and an in-memory NetworkX backend.
 
 .. toctree::
-   :maxdepth: 2
+   :maxdepth: 1
    :caption: Contents:
 
    tutorials/index
    api/base
    api/drm_entities
+   api/graph_store
+   api/migration
    api/neo4j_graph
    api/networkx_graph
    api/rdf_schema
    api/schema_gen
+   api/torch_dataloader
 
 Features
 --------
@@ -44,6 +47,13 @@ Features
 - **Lazy background initialization**: ``init_propagation()`` scans the
   backend graph, detects WeakNodes from edge structure, and initializes
   propagation properties. Supports background mode and progress callbacks.
+- **Backend-to-backend migration**: ``cvcdocdb.migration.migrate()`` copies
+  an entire graph — nodes, edges, and vector indexes — between any two
+  ``GraphStore`` backends (e.g. ``NetworkXGraph`` → ``Neo4jGraph``).
+- **PyTorch / PyTorch Geometric dataloader**: ``cvcdocdb.torch_dataloader``
+  streams a graph into PyG-ready tensors for node embedding models
+  (``MetaPath2Vec``) and link prediction, without loading the whole graph
+  into memory.
 
 Primary Key
 -----------

@@ -1439,7 +1439,33 @@ class NetworkXGraph(GraphStore):
     # ------------------------------------------------------------------
 
     @contextmanager
-    def _guarded_write(self) -> Iterator[None]:
+    def batch(self, write: bool = True) -> Iterator[None]:
+        """Hold the cross-process write lock for the whole ``with`` block.
+
+        Groups multiple mutating calls (or a mix of reads and mutating
+        calls, as in :func:`cvcdocdb.migration.migrate`) under a single
+        acquisition of the file lock instead of one per call — mirrors
+        ``Neo4jGraph.batch()``'s transaction-grouping contract on this
+        backend. It's a write lock: other processes/instances calling any
+        mutating method (which all go through :meth:`_guarded_write`)
+        block until this block exits, while reads (which never touch the
+        lock) are never blocked, including reads made by *this* instance.
+        Reentrant — nesting is a no-op, same as ``_guarded_write``.
+
+        Args:
+            write: If False, still acquires the lock (blocking concurrent
+                writers for the whole block, so reads made inside see a
+                consistent snapshot) but skips the resave on exit, since
+                nothing was mutated — used when this instance is only
+                being read from within the block (e.g. as the *source* of
+                :func:`cvcdocdb.migration.migrate`), to avoid rewriting
+                the whole persisted graph to disk for nothing.
+        """
+        with self._guarded_write(save=write):
+            yield
+
+    @contextmanager
+    def _guarded_write(self, save: bool = True) -> Iterator[None]:
         """Serialize a load-mutate-save cycle across processes/instances.
 
         Every public mutating method wraps its body in this context
@@ -1476,7 +1502,7 @@ class NetworkXGraph(GraphStore):
             if is_outermost:
                 self._load_state()
             yield
-            if is_outermost:
+            if is_outermost and save:
                 self._save_state()
         finally:
             self._file_lock.release()

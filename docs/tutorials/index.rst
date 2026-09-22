@@ -62,6 +62,19 @@ example still runs.
 
    notebooks/datasets/bibliography_openalex
 
+PyTorch / PyTorch Geometric dataloader
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Streams the bibliographic dataset through ``cvcdocdb.torch_dataloader``
+(``GraphDataset``, ``SubgraphDataset``), trains node embeddings with
+``MetaPath2Vec`` on the heterogeneous Author/Paper graph, and runs a small
+link-prediction example.
+
+.. toctree::
+   :maxdepth: 1
+
+   notebooks/datasets/torch_dataloader_bibliography
+
 Movies
 ~~~~~~
 
