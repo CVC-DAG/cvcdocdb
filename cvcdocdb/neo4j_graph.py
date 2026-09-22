@@ -323,19 +323,7 @@ class Neo4jGraph:
                 # print(node)
                 self._tx.commit()
         except ConstraintError as err:
-            try:
-                self._tx.rollback()
-            except Exception:
-                pass
-            try:
-                self._tx.close()
-            except Exception:
-                pass
-            self._tx = None
-            raise RuntimeError("Duplicate key: " + err.message) from err
-        except TransactionError as err:
-            msg = str(err)
-            if "Duplicate key" in msg or "NODE KEY" in msg or "Transaction failed" in msg or "ConstraintValidationFailed" in msg:
+            if inici:
                 try:
                     self._tx.rollback()
                 except Exception:
@@ -345,17 +333,26 @@ class Neo4jGraph:
                 except Exception:
                     pass
                 self._tx = None
+            raise RuntimeError("Duplicate key: " + err.message) from err
+        except TransactionError as err:
+            msg = str(err)
+            is_duplicate = (
+                "Duplicate key" in msg or "NODE KEY" in msg
+                or "Transaction failed" in msg or "ConstraintValidationFailed" in msg
+            )
+            if inici:
+                try:
+                    self._tx.rollback()
+                except Exception:
+                    pass
+                try:
+                    self._tx.close()
+                except Exception:
+                    pass
+                self._tx = None
+            if is_duplicate:
                 raise RuntimeError("Duplicate key: " + msg) from err
             print(err)
-            try:
-                self._tx.rollback()
-            except Exception:
-                pass
-            try:
-                self._tx.close()
-            except Exception:
-                pass
-            self._tx = None
             raise
         finally:
             if inici and self._tx is not None:
@@ -468,7 +465,11 @@ class Neo4jGraph:
             return False
         except TransactionError as err:
             msg = str(err)
-            if "Duplicate key" in msg or "NODE KEY" in msg or "Transaction failed" in msg or "ConstraintValidationFailed" in msg:
+            is_duplicate = (
+                "Duplicate key" in msg or "NODE KEY" in msg
+                or "Transaction failed" in msg or "ConstraintValidationFailed" in msg
+            )
+            if inici:
                 try:
                     self._tx.rollback()
                 except Exception:
@@ -477,10 +478,9 @@ class Neo4jGraph:
                     self._tx.close()
                 except Exception:
                     pass
+            if is_duplicate:
                 raise RuntimeError("Duplicate key: " + msg) from err
             print(err)
-            self._tx.rollback()
-            self._tx.close()
             raise
         else:
             if inici:
@@ -527,9 +527,10 @@ class Neo4jGraph:
                 )
             except TransactionError as err:
                 print(err)
-                self._tx.rollback()
-                self._tx.close()
-                self._tx = None
+                if inici:
+                    self._tx.rollback()
+                    self._tx.close()
+                    self._tx = None
                 raise
             else:
                 if inici:
@@ -625,9 +626,10 @@ class Neo4jGraph:
             raise
         except TransactionError as err:
             print(err)
-            self._tx.rollback()
-            self._tx.close()
-            self._tx = None
+            if inici:
+                self._tx.rollback()
+                self._tx.close()
+                self._tx = None
             raise
         else:
             if inici:
