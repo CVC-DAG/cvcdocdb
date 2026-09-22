@@ -42,6 +42,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`GraphStore.list_vector_indexes()`** (and `NetworkXGraph`/
   `Neo4jGraph` implementations) — introspects enabled vector (ANN)
   indexes, so `migrate()` can recreate them on the target.
+- **Release-only cross-backend test suite** (`test_release_schema_migration.py`,
+  new `release` pytest marker) — migrates the Karate Club dataset and a
+  small `drm_entities` graph between `NetworkXGraph`/`Neo4jGraph` and
+  compares the `schema_gen`-generated Python classes on both sides.
+  Skipped by default (even under `-m slow`); run explicitly with
+  `CVCDOCDB_RUN_RELEASE_TESTS=1 pytest -m release` before a release —
+  see `test/README.md`.
+- **CI**: `.github/workflows/test.yml` now runs `unit`+`integration`+`slow`
+  on every push/PR (with a real `neo4j:5-community` service container),
+  and `python-publish.yml` gates the PyPI publish on a `release-tests`
+  job (including the `release`-marked tests above) — previously that
+  workflow ran no tests at all before building and publishing.
 
 ### Fixed
 
@@ -56,6 +68,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `GraphStore` and `NetworkXGraph` — a caller passing the documented
   keyword name got a `TypeError` instead of the intended
   `NotImplementedError`. Renamed for consistency.
+- **`Neo4jGraph.query()` unconditionally rejected MongoDB-style dict
+  filters**, even though `NetworkXGraph.query()` has always supported
+  them as a documented "hybrid API" (dict or Cypher string) — breaking
+  the package's own portability guarantee that client code works
+  unchanged against either backend. Not a regression: this never
+  worked, since the module's first commit. Now translates the same
+  operator set `NetworkXGraph`'s matcher supports (`$eq $ne $gt $gte
+  $lt $lte $in $nin $exists $regex $contains` and `$or`/`$and`/`$not`)
+  into a parameterized Cypher `WHERE` clause, with `main_label`
+  special-cased to filter on the real Neo4j label instead of a
+  property.
+- **`NetworkXGraph.schema_yaml()` dropped edge properties** (e.g. a
+  `weight` on a relation) from the generated schema/code — it read
+  `self._graph`'s own edge data, which `insertRelation` only ever
+  populates with `rel_type`; the real properties live in
+  `self._edge_attrs` (same root cause as the `get_node_pks()` fix
+  above, but for edges).
+- **`Neo4jGraph.schema_yaml()` always reported a relationship's
+  `src`/`dst` as `"Node"`** — `sample["a"].get("labels", ("Node",))[0]`
+  looked up a *property* literally named `labels` (which real data
+  never has) instead of the driver Node's real `.labels` attribute.
+- **`Neo4jGraph.schema_yaml()`'s inferred `primary_key` was an
+  arbitrary guess** (`pk_fields[:2]` — literally "the first two
+  properties found"). Neo4j never persists which properties form the
+  real pk (the same limitation `migrate()`'s pk fallback documents);
+  every property is now used instead, which is at least honest about
+  that limitation rather than silently wrong.
 
 ## [1.1.0] - 2026-09-22
 
