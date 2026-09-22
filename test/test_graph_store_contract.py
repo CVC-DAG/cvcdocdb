@@ -333,6 +333,16 @@ class TestNetworkXGraph(unittest.TestCase):
     # -- CHECK NODE --
 
     @pytest.mark.integration
+    def test_contract_get_node_pks_includes_main_label(self) -> None:
+        """get_node_pks retorna el main_label real de cada node, no ''."""
+        graph = self._make_graph()
+        graph.insertNode(Node(pk={"id": 1}, main_label="Document"), replace=True)
+        graph.insertNode(Node(pk={"id": 2}, main_label="Author"), replace=True)
+        pks_by_label = {p["main_label"]: p["pk"] for p in graph.get_node_pks()}
+        self.assertEqual(pks_by_label, {"Document": {"id": 1}, "Author": {"id": 2}})
+        graph.close()
+
+    @pytest.mark.integration
     def test_contract_check_node_exists(self) -> None:
         """checkNode troba un node que existeix."""
         graph = self._make_graph()
@@ -797,6 +807,17 @@ class TestNeo4jGraph(unittest.TestCase):
         graph.create(migration)
         self.assertEqual(len(graph.get_node_ids()), 2)
         self.assertEqual(len(graph.get_edges()), 1)
+
+    # -- GET NODE PKS --
+
+    @pytest.mark.slow
+    def test_contract_get_node_pks_includes_main_label(self) -> None:
+        """get_node_pks retorna el main_label real de cada node, no ''."""
+        graph = self._make_graph()
+        graph.insertNode(Node(pk={"id": 1}, main_label="Document"), replace=True)
+        graph.insertNode(Node(pk={"id": 2}, main_label="Author"), replace=True)
+        pks_by_label = {p["main_label"]: p["pk"] for p in graph.get_node_pks()}
+        self.assertEqual(pks_by_label, {"Document": {"id": 1}, "Author": {"id": 2}})
 
     # -- CHECK NODE --
 
