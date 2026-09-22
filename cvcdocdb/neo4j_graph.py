@@ -4,10 +4,12 @@ Provides graph operations (insert, update, delete nodes and relations)
 with FK validation, cascade delete, and WeakNode parent propagation.
 """
 
+from contextlib import contextmanager
+
 from neo4j import GraphDatabase
 from neo4j.exceptions import ConstraintError, TransactionError
 from . import Node, Relation, WeakRelation
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Callable, Dict, Iterator, List, Optional, Set, Tuple, Union
 from tqdm import tqdm
 import re
 import threading
@@ -558,6 +560,63 @@ class Neo4jGraph:
             result.append({"main_label": label, "pk": pk})
         return result
 
+    def get_node_attrs(self, node_id: int) -> Optional[Dict[str, Any]]:
+        """Return attributes stored for a node.
+
+        Unlike ``NetworkXGraph``, Neo4j never persists which properties
+        form a node's primary key — ``pk`` is a purely client-side
+        concept applied at insert time via ``Node(pk=...)`` and not
+        stored as metadata on the node itself. Reading back an arbitrary
+        node therefore always reports ``pk=None`` here, signalling "not
+        known" rather than guessing; see
+        :func:`cvcdocdb.migration.migrate` for how a generic caller is
+        expected to handle it.
+        """
+        record = self._session.run(
+            "MATCH (n) WHERE id(n) = $nid "
+            "RETURN labels(n) AS labels, properties(n) AS props",
+            nid=node_id,
+        ).single()
+        if record is None:
+            return None
+        labels = list(record["labels"] or [])
+        props = dict(record["props"] or {})
+        main_label = labels[0] if labels else props.get("main_label", "")
+        return {
+            "pk": None,
+            "main_label": main_label,
+            "labels": labels,
+            **props,
+        }
+
+    @contextmanager
+    def batch(self) -> Iterator[None]:
+        """Group multiple ``insertNode``/``insertRelation`` calls into a
+        single Neo4j transaction, committing once at the end instead of
+        once per call — substantially faster for bulk writes (see
+        :func:`cvcdocdb.migration.migrate`).
+
+        ``insertNode``/``insertRelation`` already reuse ``self._tx`` when
+        one is open instead of starting their own (see the ``inici`` /
+        nested-parent-insert handling above); this just opens that same
+        transaction from the outside and commits/rolls back once for the
+        whole block. Nesting is safe — an inner ``batch()`` call while one
+        is already open is a no-op.
+        """
+        if self._tx is not None:
+            yield
+            return
+        self._tx = self._session.begin_transaction()
+        try:
+            yield
+            self._tx.commit()
+        except Exception:
+            self._tx.rollback()
+            raise
+        finally:
+            self._tx.close()
+            self._tx = None
+
     def get_edges(self) -> List[Tuple[int, int, str]]:
         """Return all edges as ``(src_id, dst_id, rel_type)`` tuples."""
         result = self._session.run(
@@ -905,7 +964,7 @@ class Neo4jGraph:
         self._driver.close()
 
     def enable_vector_index(
-        self, name: str, dimensions: int, space: str = "cosine", **kwargs
+        self, property_name: str, dimensions: int, space: str = "cosine", **kwargs
     ) -> None:
         """Neo4j backend does not support vector indexes."""
         raise NotImplementedError(
@@ -914,13 +973,17 @@ class Neo4jGraph:
         )
 
     def query_vector_index(
-        self, name: str, vector: List[float], top_k: int = 5
+        self, property_name: str, vector: List[float], top_k: int = 5
     ) -> List[int]:
         """Neo4j backend does not support vector queries."""
         raise NotImplementedError(
             "Vector queries are not supported by Neo4jGraph. "
             "Use NetworkXGraph for vector search."
         )
+
+    def list_vector_indexes(self) -> List[Dict[str, Any]]:
+        """Neo4j backend does not support vector indexes — always empty."""
+        return []
 
     def get_subdocuments(self, strong_node: Node) -> List[Dict[str, Any]]:
         """Return all subdocuments (WeakNodes) reachable from *strong_node*

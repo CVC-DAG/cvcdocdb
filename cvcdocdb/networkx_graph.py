@@ -1133,6 +1133,19 @@ class NetworkXGraph(GraphStore):
                 results.append((node_id, float(dist)))
         return results
 
+    def list_vector_indexes(self) -> List[Dict[str, Any]]:
+        """Return metadata for every enabled vector index."""
+        return [
+            {
+                "property_name": name,
+                "dimensions": meta["dimensions"],
+                "space": meta["space"],
+                "ef_construction": meta.get("ef_construction", 200),
+                "m": meta.get("m", 16),
+            }
+            for name, meta in self._vector_index_meta.items()
+        ]
+
     # ------------------------------------------------------------------
     # Protected helpers: node operations
     # ------------------------------------------------------------------
