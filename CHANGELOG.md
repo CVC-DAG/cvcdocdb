@@ -54,6 +54,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and `python-publish.yml` gates the PyPI publish on a `release-tests`
   job (including the `release`-marked tests above) — previously that
   workflow ran no tests at all before building and publishing.
+- **`migrate()` now holds one write lock on *both* `source` and `target`
+  for the entire migration** (all three phases, not one lock per
+  phase — vector indexes were previously not locked at all). It's a
+  write lock: concurrent reads of either store are never blocked, only
+  concurrent writes are, so migration can't be torn by another writer
+  mid-flight.
+  - **`NetworkXGraph.batch(write=True)`** — new public method, a thin
+    wrapper around the existing cross-process file lock
+    (`_guarded_write()`), giving `NetworkXGraph` the same
+    lock-for-a-whole-block contract `Neo4jGraph.batch()` already had.
+    `write=False` still acquires the lock (blocking concurrent writers)
+    but skips the resave on exit, for read-only use — `migrate()` uses
+    this for `source`, so it doesn't rewrite the whole source graph to
+    disk just for having been read.
+  - `Neo4jGraph.batch()` now also accepts `write` (ignored — a
+    read-only Neo4j transaction commit is already a no-op), for
+    interface symmetry.
+  - `Neo4jGraph.query()`/`get_node_ids()` now reuse `self._tx` when one
+    is already open (same pattern `insertNode`/`insertRelation` already
+    followed), so reading from a `Neo4jGraph` `source` inside its own
+    `batch()` transaction works instead of erroring on a second,
+    conflicting implicit transaction on the same session.
+  - Neo4j has no literal whole-database lock; the closest honest
+    approximation is a single transaction spanning the whole function —
+    documented as such in `migrate()`'s docstring, including the
+    trade-off that a very large migration now accumulates its whole
+    write set in one uncommitted transaction instead of committing
+    per-phase.
 
 ### Fixed
 

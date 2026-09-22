@@ -230,6 +230,165 @@ class TestMigrateVectorIndexes:
 
 
 # ---------------------------------------------------------------------------
+# Locking: one write lock per store, held for the whole migration
+# ---------------------------------------------------------------------------
+
+class TestMigrateLocking:
+    def test_networkxgraph_batch_write_true_resaves_on_exit(self, tmp_path):
+        store = NetworkXGraph(str(tmp_path / "g.pkl"))
+        store.insertNode(Node(pk={"id": 1}, main_label="Doc"), replace=True)
+        mtime_before = (tmp_path / "g.pkl").stat().st_mtime_ns
+        with store.batch(write=True):
+            pass
+        assert (tmp_path / "g.pkl").stat().st_mtime_ns != mtime_before
+
+    def test_networkxgraph_batch_write_false_skips_resave(self, tmp_path):
+        store = NetworkXGraph(str(tmp_path / "g.pkl"))
+        store.insertNode(Node(pk={"id": 1}, main_label="Doc"), replace=True)
+        mtime_before = (tmp_path / "g.pkl").stat().st_mtime_ns
+        with store.batch(write=False):
+            pass
+        assert (tmp_path / "g.pkl").stat().st_mtime_ns == mtime_before
+
+    def test_networkxgraph_batch_is_reentrant(self, tmp_path):
+        store = NetworkXGraph(str(tmp_path / "g.pkl"))
+        with store.batch(write=False):
+            with store.batch(write=False):
+                assert store._file_lock.is_locked
+            assert store._file_lock.is_locked
+        assert not store._file_lock.is_locked
+
+    def test_migrate_acquires_source_and_target_batch_exactly_once(
+        self, source, target
+    ):
+        source.insertNode(Node(pk={"id": 1}, main_label="Doc"), replace=True)
+        source.insertNode(Node(pk={"id": 2}, main_label="Doc"), replace=True)
+        source.insertRelation(
+            Relation(
+                Node(pk={"id": 1}, main_label="Doc"),
+                Node(pk={"id": 2}, main_label="Doc"),
+                "LINKS",
+            ),
+            replace=True,
+        )
+
+        calls = []
+        real_source_batch = source.batch
+        real_target_batch = target.batch
+
+        def spy_source_batch(write=True):
+            calls.append(("source", write))
+            return real_source_batch(write=write)
+
+        def spy_target_batch(write=True):
+            calls.append(("target", write))
+            return real_target_batch(write=write)
+
+        with patch.object(source, "batch", side_effect=spy_source_batch), \
+             patch.object(target, "batch", side_effect=spy_target_batch):
+            migrate(source, target)
+
+        # Exactly one lock acquisition per store for the *whole* migration
+        # (all 3 phases), not one per phase.
+        assert calls == [("source", False), ("target", True)]
+
+    def test_concurrent_write_to_target_blocks_until_migration_completes(
+        self, source, tmp_path
+    ):
+        import threading
+        import time
+
+        for i in range(5):
+            source.insertNode(Node(pk={"id": i}, main_label="Doc"), replace=True)
+
+        target_path = str(tmp_path / "target.pkl")
+        target = NetworkXGraph(target_path)
+
+        release_migration = threading.Event()
+        migration_started = threading.Event()
+
+        original_insert = target.insertNode
+
+        def slow_insert(*args, **kwargs):
+            migration_started.set()
+            release_migration.wait(timeout=5)
+            return original_insert(*args, **kwargs)
+
+        other_writer_done = threading.Event()
+        other_writer_ran_while_locked = {"value": None}
+
+        def other_writer():
+            migration_started.wait(timeout=5)
+            other = NetworkXGraph(target_path)
+            other.insertNode(Node(pk={"id": 999}, main_label="Other"), replace=True)
+            other_writer_ran_while_locked["value"] = release_migration.is_set()
+            other_writer_done.set()
+
+        with patch.object(target, "insertNode", side_effect=slow_insert):
+            t = threading.Thread(target=other_writer)
+            t.start()
+            migration_thread = threading.Thread(
+                target=migrate, args=(source, target)
+            )
+            migration_thread.start()
+            migration_started.wait(timeout=5)
+            # Give the other writer a moment to attempt (and block on) its
+            # own write before we let the migration proceed.
+            time.sleep(0.2)
+            assert not other_writer_done.is_set()
+            release_migration.set()
+            migration_thread.join(timeout=5)
+            t.join(timeout=5)
+
+        assert other_writer_done.is_set()
+        assert other_writer_ran_while_locked["value"] is True
+
+    def test_concurrent_read_of_source_is_not_blocked_during_migration(
+        self, tmp_path
+    ):
+        import threading
+
+        source_path = str(tmp_path / "source.pkl")
+        source = NetworkXGraph(source_path)
+        for i in range(5):
+            source.insertNode(Node(pk={"id": i}, main_label="Doc"), replace=True)
+        target = NetworkXGraph(str(tmp_path / "target.pkl"))
+
+        release_migration = threading.Event()
+        migration_started = threading.Event()
+        original_get_ids = source.get_node_ids
+
+        def slow_get_node_ids(*args, **kwargs):
+            result = original_get_ids(*args, **kwargs)
+            migration_started.set()
+            release_migration.wait(timeout=5)
+            return result
+
+        read_completed = threading.Event()
+
+        def reader():
+            migration_started.wait(timeout=5)
+            other = NetworkXGraph(source_path)
+            other.get_node_attrs(0)
+            read_completed.set()
+
+        with patch.object(source, "get_node_ids", side_effect=slow_get_node_ids):
+            t = threading.Thread(target=reader)
+            t.start()
+            migration_thread = threading.Thread(
+                target=migrate, args=(source, target)
+            )
+            migration_thread.start()
+            migration_started.wait(timeout=5)
+            # The reader should complete quickly even though the
+            # migration's write lock on `source` is still held.
+            t.join(timeout=2)
+            assert read_completed.is_set()
+            release_migration.set()
+            migration_thread.join(timeout=5)
+
+
+# ---------------------------------------------------------------------------
 # Real Neo4j: pk fallback, batched reads, cross-backend round trip
 # ---------------------------------------------------------------------------
 
