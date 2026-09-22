@@ -678,7 +678,8 @@ class Neo4jGraph:
         """Return all internal node ids in the graph."""
         if self._closed:
             return []
-        result = self._session.run("MATCH (n) RETURN id(n) AS nid")
+        runner = self._tx if self._tx is not None else self._session
+        result = runner.run("MATCH (n) RETURN id(n) AS nid")
         return [record["nid"] for record in result]
 
     def get_nodes(self) -> List[int]:
@@ -727,18 +728,28 @@ class Neo4jGraph:
         }
 
     @contextmanager
-    def batch(self) -> Iterator[None]:
-        """Group multiple ``insertNode``/``insertRelation`` calls into a
-        single Neo4j transaction, committing once at the end instead of
-        once per call — substantially faster for bulk writes (see
-        :func:`cvcdocdb.migration.migrate`).
+    def batch(self, write: bool = True) -> Iterator[None]:
+        """Group multiple calls into a single Neo4j transaction, committing
+        once at the end instead of once per call — substantially faster
+        for bulk writes (see :func:`cvcdocdb.migration.migrate`).
 
         ``insertNode``/``insertRelation`` already reuse ``self._tx`` when
         one is open instead of starting their own (see the ``inici`` /
-        nested-parent-insert handling above); this just opens that same
-        transaction from the outside and commits/rolls back once for the
-        whole block. Nesting is safe — an inner ``batch()`` call while one
-        is already open is a no-op.
+        nested-parent-insert handling above), and :meth:`query`/
+        :meth:`get_node_ids` do the same, so plain reads made inside this
+        block run in the same transaction too — giving a consistent
+        snapshot for the whole block instead of one read-committed view
+        per call. This just opens that transaction from the outside and
+        commits/rolls back once for the whole block. Nesting is safe — an
+        inner ``batch()`` call while one is already open is a no-op.
+
+        Args:
+            write: Accepted for interface symmetry with
+                ``NetworkXGraph.batch()`` (which uses it to skip an
+                unnecessary resave when the block is read-only). Neo4j has
+                no equivalent distinction worth making here — committing a
+                transaction that made no writes is a no-op — so this is
+                ignored.
         """
         if self._tx is not None:
             yield
@@ -867,7 +878,8 @@ class Neo4jGraph:
         if isinstance(filter_dict, dict) or filter_dict is None:
             return self._query_dict(filter_dict or {}, projection, sort, limit_val)
 
-        result = self._session.run(
+        runner = self._tx if self._tx is not None else self._session
+        result = runner.run(
             filter_dict or "", parameters=params or {}
         )
         records: List[Dict[str, Any]] = []
@@ -900,7 +912,8 @@ class Neo4jGraph:
             bound_params["__limit"] = limit_val
             cypher += " LIMIT $__limit"
 
-        result = self._session.run(cypher, parameters=bound_params)
+        runner = self._tx if self._tx is not None else self._session
+        result = runner.run(cypher, parameters=bound_params)
 
         records: List[Dict[str, Any]] = []
         for record in result:
