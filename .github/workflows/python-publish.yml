@@ -16,8 +16,58 @@ permissions:
   contents: read
 
 jobs:
+  release-tests:
+    # Gate: a broken release must never reach PyPI. Runs the full suite,
+    # including the expensive "release"-marked cross-backend migration +
+    # schema codegen comparisons (see test/README.md) that are otherwise
+    # skipped on every regular push/PR (see test.yml).
+    runs-on: ubuntu-latest
+
+    services:
+      neo4j:
+        image: neo4j:5-community
+        env:
+          NEO4J_AUTH: neo4j/testpassword123
+        ports:
+          - 7687:7687
+          - 7474:7474
+
+    env:
+      NEO4J_DEV_URL: bolt://localhost:7687
+      NEO4J_DEV_USER: neo4j
+      NEO4J_DEV_PASSWORD: testpassword123
+      NEO4J_DEV_DATABASE: neo4j
+      CVCDOCDB_RUN_RELEASE_TESTS: "1"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -e .
+          pip install -r requirements-test.txt
+
+      - name: Wait for Neo4j to accept Bolt connections
+        run: |
+          for i in $(seq 1 30); do
+            (echo > /dev/tcp/localhost/7687) >/dev/null 2>&1 && exit 0
+            sleep 2
+          done
+          echo "Neo4j did not become reachable in time" >&2
+          exit 1
+
+      - name: Run full test suite, including release-only tests
+        run: pytest test/ -v
+
   release-build:
     runs-on: ubuntu-latest
+    needs:
+      - release-tests
 
     steps:
       - uses: actions/checkout@v4
