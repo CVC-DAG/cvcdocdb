@@ -6,8 +6,21 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **Always work on the `develop` branch unless explicitly told otherwise.**
 
-- **`develop`** — Active development branch. All substantial changes, new features, refactors, and bug fixes go here.
+- **`develop`** — Active development branch. All substantial changes, new features, refactors, and bug fixes go here, as long as they are backward-compatible (minor/patch under SemVer).
 - **`main`** — Release branch. Only minor changes for preparing releases (version bumps, changelog entries, doc links). Never add features or make structural changes here.
+- **`major_release`** — Persistent branch for changes that would require a **major** version bump (breaking changes to the public API). Kept separate from `develop` so that `develop` → `main` releases stay backward-compatible for as long as no major release is needed. See `MAJOR_CHANGES.md` for the workflow and the running list of accumulated breaking changes.
+
+### Version numbers only change at publish time
+
+On **any** branch, a real version number (in `setup.py`'s `VERSION` and a dated `CHANGELOG.md` section) is only ever set at the exact moment of actually publishing to PyPI — never merely when merging `develop` into `main`. Merging into `main` in preparation for a release keeps the CHANGELOG entries under `[Unreleased]` and `VERSION` unchanged until the `twine upload` step itself.
+
+### Major vs. minor/patch changes
+
+Before committing a change, consider whether it would require a **major** SemVer bump (removes/renames a public method or argument, changes a return type or an existing behavior contract, etc.):
+
+- If the change is backward-compatible (new feature, bug fix, additive API), commit and work on `develop` as usual.
+- If the change is breaking, **flag it and confirm with the user before proceeding** — do not decide unilaterally to reroute it. Once confirmed, commit it to `major_release` instead of `develop`, and add an entry to `MAJOR_CHANGES.md` describing what breaks and why.
+- Never mix a major (breaking) commit with minor/patch commits in the same commit — keep them separate even if they touch the same files in the same session.
 
 Before starting any work, check the current branch:
 ```bash
