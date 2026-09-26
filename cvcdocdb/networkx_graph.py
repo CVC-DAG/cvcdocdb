@@ -490,9 +490,15 @@ class NetworkXGraph(GraphStore):
           ``main_label`` and node attributes.  Supports operators
           ``$eq``, ``$ne``, ``$gt``, ``$gte``, ``$lt``, ``$lte``,
           ``$in``, ``$nin``, ``$exists``, ``$regex``.
-        * **str** — a Cypher query string (``MATCH``, ``CREATE``,
-          ``DELETE``, ``SET``, ``RETURN``, ``ORDER BY``, ``LIMIT``,
-          aggregations, parameter substitution via ``$name``).
+        * **str** — a Cypher query string. Read-only queries are parsed
+          and evaluated with Neo4j semantics by :mod:`cvcdocdb.nx_cypher`
+          (``MATCH``/``OPTIONAL MATCH`` with node and relationship
+          patterns, ``WHERE``, ``WITH``, ``RETURN [DISTINCT]``,
+          ``ORDER BY``, ``SKIP``, ``LIMIT``, aggregations, common
+          functions, ``$name`` parameters); unsupported syntax raises
+          ``ValueError`` instead of returning wrong results. Write
+          queries (``CREATE``, ``MERGE``, ``SET``, ``DELETE``) use a
+          simpler clause-by-clause engine.
 
         Args:
             filter_dict: Filter dict for MongoDB-style queries, or Cypher
@@ -2005,7 +2011,16 @@ from typing import List as _List, Dict as _Dict, Any as _Any, Tuple as _Tuple
 def _execute_cypher(
     graph: "NetworkXGraph", cypher: str, params: _Dict[str, _Any]
 ) -> _List[_Dict[str, _Any]]:
-    """Execute a simplified Cypher query on a NetworkXGraph."""
+    """Execute a simplified Cypher query on a NetworkXGraph.
+
+    Read-only queries go to the parser-based engine in
+    :mod:`cvcdocdb.nx_cypher`; write queries (CREATE, MERGE, SET, DELETE...)
+    keep using the clause-by-clause engine below.
+    """
+    from cvcdocdb.nx_cypher import execute_read, is_write_query
+
+    if not is_write_query(cypher):
+        return execute_read(graph, cypher, params)
     # Normalize whitespace
     cypher = " ".join(cypher.split()).strip()
     # Substitute parameters
