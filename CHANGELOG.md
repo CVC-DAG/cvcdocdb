@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Bounded waits, so a stuck writer or an unresponsive Neo4j server can't
+  hang everything else forever** (backward-compatible: defaults unchanged).
+  - `NetworkXGraph(persistence_path, lock_timeout=None)`: maximum seconds
+    a mutating call, `batch()` or `migrate()` waits for the cross-process
+    file lock. On expiry it raises the new `cvcdocdb.GraphLockTimeout`
+    (a `TimeoutError`) naming the locked file, instead of blocking in
+    `FileLock.acquire()` indefinitely. `None` keeps waiting forever.
+  - `Neo4jGraph(url, user, password, database=None, **driver_config)`:
+    extra keyword arguments are forwarded to `neo4j.GraphDatabase.driver()`,
+    e.g. `connection_timeout`/`connection_acquisition_timeout` to bound
+    connecting to an unresponsive server (the driver's
+    `connection_timeout` alone does not bound the Bolt handshake —
+    `connection_acquisition_timeout` does). They do not bound a query
+    already running on a server that stops responding; a caller that needs
+    that must run the work in a process it can terminate.
+  - Found in production: `migrate()` holds the source `NetworkXGraph`'s
+    lock for the whole migration, so a Neo4j target that stopped answering
+    left every other writer of that `.pkl` blocked with no way out.
 - **`cvcdocdb.text2cypher.Text2Cypher(graph, llm)`** — natural-language
   questions over a graph, with the same API for every backend (a script
   doesn't change when the backend does). `query()` returns the Cypher
