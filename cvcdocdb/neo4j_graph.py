@@ -203,6 +203,12 @@ class Neo4jGraph:
         user: Authentication username.
         password: Authentication password.
         database: Target database name. Defaults to the Neo4j default.
+        **driver_config: Extra keyword arguments forwarded unchanged to
+            ``neo4j.GraphDatabase.driver()`` — e.g.
+            ``connection_timeout``/``connection_acquisition_timeout`` to
+            bound how long connecting to an unresponsive server may take
+            (the driver's own defaults otherwise). Note these do not bound a
+            query already running on a server that stops responding.
     """
 
     def __init__(
@@ -211,8 +217,9 @@ class Neo4jGraph:
         user: str,
         password: str,
         database: Optional[str] = None,
+        **driver_config: Any,
     ) -> None:
-        self._driver = GraphDatabase.driver(url, auth=(user, password))
+        self._driver = GraphDatabase.driver(url, auth=(user, password), **driver_config)
         self._tx = None
         self._closed = False
         # Internal tracking: neo4j_id -> pk dict (for get_node_pks)
