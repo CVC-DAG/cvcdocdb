@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`NetworkXGraph.query(cypher)` gave wrong results for many basic read
+  queries** — `WHERE` was ignored except for `=`, labelled relationship
+  patterns (`(a:A)-[:R]->(b:B)`) matched nothing, `ORDER BY`/`SKIP`,
+  grouping, `OPTIONAL MATCH` and alternative labels didn't work. Read-only
+  queries now go through a new parser-based engine (`cvcdocdb.nx_cypher`)
+  with Neo4j semantics for the supported subset: `MATCH`/`OPTIONAL MATCH`
+  (node/relationship chains, `<-`/`->`/undirected, `:T1|T2`, inline
+  property maps, several comma-separated patterns, relationship
+  uniqueness), `WHERE` (comparisons, `AND`/`OR`/`XOR`/`NOT` with `null`
+  logic, `IS [NOT] NULL`, `IN`, `STARTS WITH`/`ENDS WITH`/`CONTAINS`,
+  `=~`, label predicates, arithmetic), `WITH`, `RETURN [DISTINCT]`,
+  `ORDER BY`, `SKIP`, `LIMIT`, `count`/`sum`/`avg`/`min`/`max`/`collect`
+  (with `DISTINCT` and implicit grouping) and common scalar functions.
+  `$params` are bound as values instead of being pasted into the query
+  text. A differential test checks identical results against a real Neo4j.
+  - Behaviour changes: unsupported read syntax (variable-length paths,
+    path variables, `UNWIND`, `UNION`, `CASE`, subqueries, unknown
+    functions) now raises `ValueError` instead of silently returning
+    wrong results, and returned nodes' `labels` now include alternative
+    labels (as on Neo4j). Write queries are unchanged.
+
 ## [1.2.0] - 2026-09-23
 
 ### Added
