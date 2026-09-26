@@ -17,6 +17,7 @@ document representation with Neo4j and an in-memory NetworkX backend.
    api/networkx_graph
    api/rdf_schema
    api/schema_gen
+   api/text2cypher
    api/torch_dataloader
 
 Features
