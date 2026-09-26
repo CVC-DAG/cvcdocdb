@@ -46,6 +46,10 @@ setup(
     packages=PACKAGES,
     package_dir={"": "."},
     install_requires=get_requirements(),
+    extras_require={
+        # Natural-language → Cypher (cvcdocdb.text2cypher); needs Python >= 3.10.
+        "graphrag": ["neo4j-graphrag>=1.21,<2"],
+    },
     keywords=["document representation", "knowledge graph", "neo4j", "networkx", "document analysis"],
     classifiers=[
         "Development Status :: 4 - Beta",
