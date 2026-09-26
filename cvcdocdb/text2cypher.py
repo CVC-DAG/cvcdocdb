@@ -30,9 +30,12 @@ Backends:
   Requires the optional dependency: ``pip install cvcdocdb[graphrag]``.
 - Any other backend with a Cypher-capable ``query()`` (e.g.
   ``NetworkXGraph``) — handled by cvcdocdb itself, no extra dependency; the
-  query is checked for write clauses and run with ``graph.query()``. Only
-  the Cypher subset that backend's ``query()`` understands will give
-  correct results.
+  query is checked for write clauses and run with ``graph.query()``. On
+  ``NetworkXGraph`` that evaluates the common read-only Cypher (patterns,
+  ``WHERE``, ``WITH``, aggregations, ``ORDER BY``...) with Neo4j semantics
+  (see :mod:`cvcdocdb.nx_cypher`); a query using syntax it doesn't support
+  (variable-length paths, ``UNWIND``, ``CASE``...) raises
+  :class:`Text2CypherError` instead of returning wrong results.
 """
 
 import asyncio

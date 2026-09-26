@@ -343,6 +343,16 @@ def populated_graph_neo4j():
 
 
 @pytest.mark.integration
+def test_networkx_unsupported_cypher_raises_text2cypher_error(tmp_path):
+    from cvcdocdb.networkx_graph import NetworkXGraph
+
+    graph = NetworkXGraph(persistence_path=str(tmp_path / "g.pkl"))
+    t2c = Text2Cypher(graph, llm=lambda p: "MATCH (a)-[*1..2]->(b) RETURN b")
+    with pytest.raises(Text2CypherError, match="not supported"):
+        t2c.query("reachable nodes?")
+
+
+@pytest.mark.integration
 def test_networkx_needs_no_retriever(tmp_path):
     from cvcdocdb.networkx_graph import NetworkXGraph
 

@@ -48,8 +48,13 @@ Backends
   retriever, e.g. to plug it into a ``neo4j_graphrag`` ``GraphRAG`` pipeline.
 - ``NetworkXGraph`` (or any backend whose ``query()`` accepts Cypher) —
   handled by cvcdocdb itself, with no extra dependency; the query is run with
-  ``graph.query(cypher)``. Only the Cypher subset that backend's ``query()``
-  understands gives correct results.
+  ``graph.query(cypher)``. ``NetworkXGraph`` evaluates the common read-only
+  Cypher (node/relationship patterns, ``WHERE``, ``WITH``, aggregations,
+  ``ORDER BY``, ``SKIP``/``LIMIT``...) with the same results as Neo4j — see
+  :mod:`cvcdocdb.nx_cypher` for the supported subset. If the LLM generates
+  syntax outside it (variable-length paths, ``UNWIND``, ``CASE``...),
+  :class:`~cvcdocdb.text2cypher.Text2CypherError` is raised instead of
+  returning wrong results.
 
 Notes
 -----
@@ -70,3 +75,4 @@ Notes
    :members:
    :member-order: bysource
    :show-inheritance:
+   :exclude-members: retriever, cypher, records, metadata

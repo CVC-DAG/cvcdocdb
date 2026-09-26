@@ -15,6 +15,7 @@ document representation with Neo4j and an in-memory NetworkX backend.
    api/migration
    api/neo4j_graph
    api/networkx_graph
+   api/nx_cypher
    api/rdf_schema
    api/schema_gen
    api/text2cypher
