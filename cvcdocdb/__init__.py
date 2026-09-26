@@ -2,7 +2,7 @@ __version__ = "1.0.0"
 
 from .base import *
 from .drm_entities import *
-from .graph_store import GraphStore
+from .graph_store import GraphLockTimeout, GraphStore
 
 
 def __getattr__(name):

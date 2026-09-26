@@ -25,6 +25,12 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 from .base import Node, Relation
 
 
+class GraphLockTimeout(TimeoutError):
+    """A graph store's write lock could not be acquired within the configured
+    timeout (e.g. ``NetworkXGraph(lock_timeout=...)``) — another process or
+    instance is holding it, typically a long or stuck write/migration."""
+
+
 class GraphStore(ABC):
     """Abstract interface for graph-backed stores (Neo4j, NetworkX, etc.).
 

@@ -19,12 +19,16 @@ except ImportError:  # pragma: no cover - guarded at runtime in vector APIs
     hnswlib = None
 
 try:
-    from filelock import FileLock
+    from filelock import FileLock, Timeout as FileLockTimeout
 except ImportError:  # pragma: no cover - guarded at runtime in __init__
     FileLock = None
+    FileLockTimeout = None
 
 from .base import Node, Relation, WeakRelation
-from .graph_store import GraphStore
+from .graph_store import GraphLockTimeout, GraphStore
+
+# filelock's "wait forever" value for acquire(timeout=...).
+_WAIT_FOREVER = -1
 
 
 class NetworkXGraph(GraphStore):
@@ -35,7 +39,27 @@ class NetworkXGraph(GraphStore):
     without a real database.
     """
 
-    def __init__(self, persistence_path: Optional[str] = None) -> None:
+    def __init__(
+        self,
+        persistence_path: Optional[str] = None,
+        lock_timeout: Optional[float] = None,
+    ) -> None:
+        """
+        Args:
+            persistence_path: Pickle file backing the graph; defaults to a
+                per-workspace file under ``~/.cache/cvcdocdb``.
+            lock_timeout: Maximum seconds a mutating call (or ``batch()``,
+                including :func:`cvcdocdb.migration.migrate`) waits for the
+                cross-process file lock before raising
+                :class:`~cvcdocdb.graph_store.GraphLockTimeout`. ``None``
+                (default) waits forever, as before.
+
+        Raises:
+            ValueError: If *lock_timeout* is negative.
+        """
+        if lock_timeout is not None and lock_timeout < 0:
+            raise ValueError(f"lock_timeout must be >= 0 or None, got {lock_timeout!r}")
+        self._lock_timeout = lock_timeout
         self._graph: nx.MultiDiGraph = nx.MultiDiGraph()
         self._node_attrs: Dict[int, Dict[str, Any]] = {}
         self._edge_attrs: Dict[Tuple[int, int, str], Dict[str, Any]] = {}
@@ -1503,7 +1527,15 @@ class NetworkXGraph(GraphStore):
         partial write.
         """
         is_outermost = not self._file_lock.is_locked
-        self._file_lock.acquire()
+        timeout = _WAIT_FOREVER if self._lock_timeout is None else self._lock_timeout
+        try:
+            self._file_lock.acquire(timeout=timeout)
+        except FileLockTimeout as exc:
+            raise GraphLockTimeout(
+                f"Could not acquire the write lock on {self._persistence_path!r} "
+                f"within {self._lock_timeout}s: another process or instance is holding it "
+                f"(a long or stuck write/migration)"
+            ) from exc
         try:
             if is_outermost:
                 self._load_state()
