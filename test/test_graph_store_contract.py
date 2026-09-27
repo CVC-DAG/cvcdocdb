@@ -517,6 +517,25 @@ class TestNetworkXGraph(unittest.TestCase):
         graph.close()
 
 
+def _reset_neo4j_pk_schema(graph: GraphStore) -> None:
+    """Esborra les restriccions/índexs de pk de cvcdocdb i la memòria cau de
+    formes de pk del graf: des de la 2.0 (una forma de pk per etiqueta,
+    amb restricció a la base), cada test ha de començar amb l'esquema net o
+    hereta la forma de pk que un altre test va donar a la mateixa etiqueta."""
+    session = graph._session
+    for row in session.run("SHOW CONSTRAINTS YIELD name WHERE name STARTS WITH 'cvcdocdb_pk' RETURN name"):
+        session.run(f"DROP CONSTRAINT `{row['name']}` IF EXISTS").consume()
+    for row in session.run(
+        "SHOW INDEXES YIELD name, owningConstraint WHERE name STARTS WITH 'cvcdocdb_pk' "
+        "AND owningConstraint IS NULL RETURN name"
+    ):
+        session.run(f"DROP INDEX `{row['name']}` IF EXISTS").consume()
+    graph._known_pk_shapes_by_label = None
+    graph._constrained_labels.clear()
+    graph._pk_shapes.clear()
+    graph._indexed_pk_shapes.clear()
+
+
 class TestNeo4jGraph(unittest.TestCase):
     """Contract tests for Neo4jGraph.
 
@@ -607,6 +626,7 @@ class TestNeo4jGraph(unittest.TestCase):
                 self._graph._tx = None
             self._graph._node_pks.clear()
             self._graph._closed = False
+            _reset_neo4j_pk_schema(self._graph)
 
     # -- ON DELETE RESTRICT --
 

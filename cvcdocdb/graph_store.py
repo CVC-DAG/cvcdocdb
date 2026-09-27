@@ -233,6 +233,26 @@ class GraphStore(ABC):
         """
         return []
 
+    def ensure_pk_constraints(
+        self,
+        pk_shapes: Optional[Any] = None,
+    ) -> List[str]:
+        """Create database-level primary-key constraints (one per label), if
+        the backend supports them. Idempotent.
+
+        Args:
+            pk_shapes: Iterable of ``(main_label, pk_property_names)``, at
+                most one shape per label. When omitted, the backend uses the
+                shapes it has seen inserted.
+
+        Returns:
+            The names of the constraints created by this call.
+
+        The default is a no-op (``NetworkXGraph`` enforces pk uniqueness in
+        its own in-memory index).
+        """
+        return []
+
     # ------------------------------------------------------------------
     # Optional vector index API (concrete default)
     # ------------------------------------------------------------------

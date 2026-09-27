@@ -48,6 +48,8 @@ class MigrationStats:
     errors: List[str] = field(default_factory=list)
     #: Pk indexes created on *target* (``migrate(create_indexes=True)``).
     pk_indexes_created: int = 0
+    #: Pk constraints created on *target* (``migrate(create_constraints=True)``).
+    pk_constraints_created: int = 0
 
 
 def migrate(
@@ -60,6 +62,7 @@ def migrate(
     chunk_size: int = _DEFAULT_CHUNK_SIZE,
     on_error: str = "raise",
     create_indexes: bool = False,
+    create_constraints: bool = False,
 ) -> MigrationStats:
     """Copy an entire graph from *source* into *target*, in three phases:
     **nodes**, then **edges**, then **vector indexes**.
@@ -158,6 +161,13 @@ def migrate(
             Counted in ``MigrationStats.pk_indexes_created``. Only shapes
             whose pk the source really knows are indexed (a ``Neo4jGraph``
             source reports ``pk=None`` — see above — and is skipped).
+        create_constraints: If True, after the migration commits, create on
+            *target* one pk constraint per migrated label (see
+            ``GraphStore.ensure_pk_constraints``; a no-op on
+            ``NetworkXGraph``). Runs before ``create_indexes`` (a
+            constraint brings its own index). Counted in
+            ``MigrationStats.pk_constraints_created``. Fails for a label
+            whose migrated nodes use several pk shapes.
 
     Returns:
         A :class:`MigrationStats` with the counts of what was copied.
@@ -256,8 +266,15 @@ def migrate(
                 stats.errors.append(f"vector index {index_meta.get('property_name')}: {exc}")
                 stats.indexes_skipped += 1
 
-    # -- Phase 4: pk indexes (after commit: Neo4j forbids schema changes in
-    # a transaction that also wrote data) -------------------------------
+    # -- Phase 4: pk constraints and indexes (after commit: Neo4j forbids
+    # schema changes in a transaction that also wrote data) --------------
+    if create_constraints and pk_shapes:
+        try:
+            stats.pk_constraints_created = len(target.ensure_pk_constraints(pk_shapes))
+        except Exception as exc:  # noqa: BLE001
+            if on_error == "raise":
+                raise
+            stats.errors.append(f"pk constraints: {exc}")
     if create_indexes and pk_shapes:
         try:
             stats.pk_indexes_created = len(target.ensure_pk_indexes(pk_shapes))

@@ -7,6 +7,11 @@ compatibles amb el disseny actual, on una etiqueta pot tenir diverses formes
 de pk — canvi additiu, no trencador. Les restriccions (NODE KEY/UNIQUE) són
 un canvi trencador i viuen a `major_release`.
 
+A la 2.0 (`pk_constraints=True` per defecte) una etiqueta té una sola
+forma de pk amb restricció, que ja porta el seu índex: aquests índexs
+independents són per al mode `pk_constraints=False` (comportament 1.x), i
+els tests s'hi obren.
+
 Tests `slow`: necessiten un Neo4j real (NEO4J_DEV_URL/USER/PASSWORD/DATABASE);
 es salten si no n'hi ha. La base de dades de proves es buida (dades i
 índexs creats per aquests tests) abans de cada test.
@@ -109,6 +114,7 @@ class Neo4jPkIndexesTest(unittest.TestCase):
         self.graph = self._open()
         self._wipe()
 
+
     def tearDown(self) -> None:
         if hasattr(self, "graph"):
             self._wipe()
@@ -116,11 +122,15 @@ class Neo4jPkIndexesTest(unittest.TestCase):
 
     def _open(self, **kwargs):
         c = self.config
+        kwargs.setdefault("pk_constraints", False)
         return self.Neo4jGraph(c["url"], c["user"], c["password"], database=c["database"], **kwargs)
 
     def _wipe(self) -> None:
         self.graph.query("MATCH (n) DETACH DELETE n")
-        for row in self.graph.query("SHOW INDEXES YIELD name WHERE name STARTS WITH 'cvcdocdb_pk_' RETURN name"):
+        for row in self.graph.query("SHOW CONSTRAINTS YIELD name WHERE name STARTS WITH 'cvcdocdb_pk' RETURN name"):
+            self.graph.query(f"DROP CONSTRAINT `{row['name']}` IF EXISTS")
+        for row in self.graph.query("SHOW INDEXES YIELD name, owningConstraint WHERE name STARTS WITH 'cvcdocdb_pk_' "
+                                    "AND owningConstraint IS NULL RETURN name"):
             self.graph.query(f"DROP INDEX `{row['name']}` IF EXISTS")
 
     def _pk_indexes(self) -> dict:

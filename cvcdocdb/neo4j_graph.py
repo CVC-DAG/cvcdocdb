@@ -24,6 +24,11 @@ _CYPHER_IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 #: Prefix of the pk indexes created by :meth:`Neo4jGraph.ensure_pk_indexes`.
 PK_INDEX_PREFIX = "cvcdocdb_pk_"
+#: Prefix of the pk constraints created by :meth:`Neo4jGraph.ensure_pk_constraints`
+#: (one per label: ``cvcdocdb_pkc_<Label>``).
+PK_CONSTRAINT_PREFIX = "cvcdocdb_pkc_"
+#: Fragments with which Neo4j Community rejects NODE KEY constraints.
+_NODE_KEY_UNSUPPORTED_MARKERS = ("enterprise", "not supported", "unsupported")
 #: Pk entries that are not node properties (the backend's internal id).
 _INTERNAL_PK_KEYS = frozenset({"neo4j_id"})
 
@@ -48,6 +53,19 @@ def _pk_index_statement(main_label: str, props: Tuple[str, ...]) -> Tuple[str, s
     name = PK_INDEX_PREFIX + "_".join((main_label, *props))
     columns = ", ".join(f"n.`{prop}`" for prop in props)
     return name, f"CREATE INDEX `{name}` IF NOT EXISTS FOR (n:`{main_label}`) ON ({columns})"
+
+
+def _pk_constraint_statement(main_label: str, props: Tuple[str, ...], node_key: bool) -> Tuple[str, str]:
+    """``(constraint name, CREATE CONSTRAINT statement)`` for a label's pk:
+    ``IS NODE KEY`` (uniqueness + existence, Enterprise) or ``IS UNIQUE``
+    (Community)."""
+    _validate_cypher_identifier(main_label, "main_label")
+    for prop in props:
+        _validate_cypher_identifier(prop, "pk property")
+    name = PK_CONSTRAINT_PREFIX + main_label
+    columns = ", ".join(f"n.`{prop}`" for prop in props)
+    kind = "IS NODE KEY" if node_key else "IS UNIQUE"
+    return name, f"CREATE CONSTRAINT `{name}` IF NOT EXISTS FOR (n:`{main_label}`) REQUIRE ({columns}) {kind}"
 
 
 def _validate_cypher_identifier(name: Any, kind: str) -> str:
@@ -231,6 +249,14 @@ class Neo4jGraph:
         user: Authentication username.
         password: Authentication password.
         database: Target database name. Defaults to the Neo4j default.
+        pk_constraints: If True (the default since 2.0), each label has a
+            single pk shape — inserting a node whose pk shape differs from
+            the label's raises ``ValueError`` — and, after each commit, a
+            database-level pk constraint is created for every new label
+            (:meth:`ensure_pk_constraints`; needs ``CONSTRAINT
+            MANAGEMENT``, a failure only warns). ``False`` restores the 1.x
+            behaviour: several pk shapes per label, uniqueness checked only
+            by cvcdocdb.
         auto_pk_indexes: If True, after each commit (a standalone
             ``insertNode`` or a whole :meth:`batch`), create the pk indexes
             for any pk shape not indexed yet (:meth:`ensure_pk_indexes`).
@@ -250,10 +276,18 @@ class Neo4jGraph:
         user: str,
         password: str,
         database: Optional[str] = None,
+        pk_constraints: bool = True,
         auto_pk_indexes: bool = False,
         **driver_config: Any,
     ) -> None:
         self._driver = GraphDatabase.driver(url, auth=(user, password), **driver_config)
+        self._database = database
+        self._pk_constraints = pk_constraints
+        # label -> pk props: the single pk shape of each label (from the
+        # database's cvcdocdb_pkc_* constraints, loaded lazily, plus labels
+        # first inserted through this instance). None = not loaded yet.
+        self._known_pk_shapes_by_label: Optional[Dict[str, Tuple[str, ...]]] = None
+        self._constrained_labels: Set[str] = set()
         self._auto_pk_indexes = auto_pk_indexes
         # Pk shapes (main_label, props) inserted through this instance, and
         # the ones already indexed (or given up on) — see ensure_pk_indexes.
@@ -342,6 +376,8 @@ class Neo4jGraph:
 
         # self._session.write_transaction(self._create_constraint, node.main_label, list(node['pk']['pk'].keys()))
         if self._tx is None:
+            if self._pk_constraints:
+                self._label_pk_shapes()  # abans d'obrir la transacció (veure _check_single_pk_shape)
             self._tx = self._session.begin_transaction()
             inici = True
 
@@ -408,7 +444,7 @@ class Neo4jGraph:
                     pass
                 self._tx = None
         if inici:
-            self._auto_index_new_pk_shapes()
+            self._after_commit_schema()
         return id  # only reached if no exception was raised above
 
     def deleteNode(
@@ -804,6 +840,8 @@ class Neo4jGraph:
         if self._tx is not None:
             yield
             return
+        if self._pk_constraints:
+            self._label_pk_shapes()  # abans d'obrir la transacció (veure _check_single_pk_shape)
         self._tx = self._session.begin_transaction()
         committed = False
         try:
@@ -817,7 +855,7 @@ class Neo4jGraph:
             self._tx.close()
             self._tx = None
         if committed:
-            self._auto_index_new_pk_shapes()
+            self._after_commit_schema()
 
     # ------------------------------------------------------------------
     # Primary-key indexes
@@ -878,6 +916,197 @@ class Neo4jGraph:
                 f"Creating pk indexes requires INDEX MANAGEMENT on the database: {exc.message}"
             ) from exc
         return created
+
+    # ------------------------------------------------------------------
+    # Primary-key constraints (2.0: one pk shape per label)
+    # ------------------------------------------------------------------
+
+    def _run_schema_read(self, query: str) -> List[Any]:
+        """Run a SHOW query: on this instance's own session when no
+        transaction is open (like every other call), or in a short session
+        of its own while one is (e.g. inside batch()), since a session runs
+        one transaction at a time."""
+        if self._tx is None:
+            return list(self._session.run(query))
+        session = (
+            self._driver.session(database=self._database)
+            if self._database else self._driver.session()
+        )
+        with session:
+            return list(session.run(query))
+
+    def _label_pk_shapes(self) -> Dict[str, Tuple[str, ...]]:
+        if self._known_pk_shapes_by_label is None:
+            rows = self._run_schema_read(
+                "SHOW CONSTRAINTS YIELD name, labelsOrTypes, properties "
+                f"WHERE name STARTS WITH '{PK_CONSTRAINT_PREFIX}' RETURN labelsOrTypes, properties"
+            )
+            self._known_pk_shapes_by_label = {
+                row["labelsOrTypes"][0]: tuple(sorted(row["properties"])) for row in rows
+            }
+            self._constrained_labels |= set(self._known_pk_shapes_by_label)
+        return self._known_pk_shapes_by_label
+
+    def _check_single_pk_shape(
+        self, main_label: str, shape: Optional[Tuple[str, Tuple[str, ...]]]
+    ) -> None:
+        """2.0 rule: a label has exactly one pk shape. Raises before anything
+        is written; the first shape inserted for a label becomes its shape.
+        Only reads the cache, which insertNode()/batch() load before opening
+        their transaction — never queries the database mid-transaction."""
+        known = self._label_pk_shapes().get(main_label)
+        props = shape[1] if shape is not None else ()
+        if known is None:
+            if props:
+                self._known_pk_shapes_by_label[main_label] = props  # type: ignore[index]
+            return
+        if props != known:
+            raise ValueError(
+                f"Label {main_label!r} already uses pk {list(known)}; got {list(props) or 'no pk'}. "
+                "Since cvcdocdb 2.0 each label has a single pk shape (enforced by a "
+                "database constraint); use another label, or pk_constraints=False for the 1.x behaviour."
+            )
+
+    def ensure_pk_constraints(self, pk_shapes: Optional[Any] = None) -> List[str]:
+        """Create one database-level pk constraint per label: ``IS NODE KEY``
+        (Enterprise: uniqueness + existence) or, where unsupported
+        (Community), ``IS UNIQUE``. Idempotent.
+
+        A constraint brings its own index, so any standalone index on the
+        same label and properties (e.g. from :meth:`ensure_pk_indexes`) is
+        dropped first — Neo4j refuses both on the same schema — and restored
+        if the constraint can't be created.
+
+        Args:
+            pk_shapes: Iterable of ``(main_label, pk_property_names)``, at
+                most one per label. Defaults to the shapes inserted through
+                this instance.
+
+        Returns:
+            Names of the constraints created by this call.
+
+        Raises:
+            RuntimeError: Inside :meth:`batch` or an open transaction.
+            ValueError: A label given several pk shapes, already constrained
+                on a different shape, or whose existing data violates the
+                constraint (duplicates, missing pk properties, mixed shapes).
+            PermissionError: If the user lacks ``CONSTRAINT MANAGEMENT``.
+        """
+        if self._tx is not None:
+            raise RuntimeError(
+                "ensure_pk_constraints() can't run inside batch() or an open transaction: "
+                "Neo4j doesn't allow schema changes in a transaction that writes data"
+            )
+        requested = set(self._pk_shapes) if pk_shapes is None else {
+            (label, tuple(sorted(props))) for label, props in pk_shapes if props
+        }
+        by_label: Dict[str, Tuple[str, ...]] = {}
+        for label, props in requested:
+            if label in by_label and by_label[label] != props:
+                raise ValueError(
+                    f"Label {label!r} requested with several pk shapes: {sorted([by_label[label], props])}"
+                )
+            by_label[label] = props
+
+        created: List[str] = []
+        try:
+            existing = {
+                row["labelsOrTypes"][0]: frozenset(row["properties"])
+                for row in self._session.run(
+                    "SHOW CONSTRAINTS YIELD type, labelsOrTypes, properties "
+                    "WHERE type IN ['NODE_KEY', 'UNIQUENESS'] AND size(labelsOrTypes) = 1 "
+                    "RETURN labelsOrTypes, properties"
+                )
+            }
+            standalone_indexes = {
+                (row["labelsOrTypes"][0], frozenset(row["properties"])): row["name"]
+                for row in self._session.run(
+                    "SHOW INDEXES YIELD name, entityType, labelsOrTypes, properties, owningConstraint "
+                    "WHERE entityType = 'NODE' AND owningConstraint IS NULL AND size(labelsOrTypes) = 1 "
+                    "RETURN name, labelsOrTypes, properties"
+                )
+            }
+            for label, props in sorted(by_label.items()):
+                if label in existing:
+                    if existing[label] != frozenset(props):
+                        raise ValueError(
+                            f"Label {label!r} already has a pk constraint on {sorted(existing[label])}; "
+                            f"can't add one on {list(props)} (one pk shape per label)"
+                        )
+                    self._constrained_labels.add(label)
+                    continue
+                index_name = standalone_indexes.get((label, frozenset(props)))
+                if index_name:
+                    self._session.run(f"DROP INDEX `{index_name}` IF EXISTS").consume()
+                try:
+                    created.append(self._create_pk_constraint(label, props))
+                except Exception:
+                    if index_name:  # no deixar l'etiqueta sense índex
+                        self._session.run(_pk_index_statement(label, props)[1]).consume()
+                    raise
+                self._constrained_labels.add(label)
+                if self._known_pk_shapes_by_label is not None:
+                    self._known_pk_shapes_by_label[label] = props
+        except Forbidden as exc:
+            raise PermissionError(
+                f"Creating pk constraints requires CONSTRAINT MANAGEMENT on the database: {exc.message}"
+            ) from exc
+        return created
+
+    def _create_pk_constraint(self, label: str, props: Tuple[str, ...]) -> str:
+        name, statement = _pk_constraint_statement(label, props, node_key=True)
+        try:
+            self._session.run(statement).consume()
+            return name
+        except Forbidden:
+            raise
+        except Exception as exc:  # noqa: BLE001 - classified below
+            message = str(getattr(exc, "message", exc)).lower()
+            if not any(marker in message for marker in _NODE_KEY_UNSUPPORTED_MARKERS):
+                raise ValueError(
+                    f"Can't create the pk constraint on {label}{list(props)}: existing data violates it "
+                    f"(duplicates, missing pk properties or several pk shapes): {exc}"
+                ) from exc
+        # Community: IS UNIQUE doesn't require the pk properties to exist, so
+        # check what NODE KEY would have enforced (e.g. mixed pk shapes).
+        missing = " OR ".join(f"n.`{p}` IS NULL" for p in props)
+        [row] = self._session.run(
+            f"MATCH (n:`{label}`) WHERE {missing} RETURN count(n) AS c"
+        )
+        if row["c"]:
+            raise ValueError(
+                f"Can't create the pk constraint on {label}{list(props)}: {row['c']} existing "
+                f"{label} node(s) lack some of these pk properties (several pk shapes?)"
+            )
+        name, statement = _pk_constraint_statement(label, props, node_key=False)  # Community
+        try:
+            self._session.run(statement).consume()
+        except Forbidden:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            raise ValueError(
+                f"Can't create the pk constraint on {label}{list(props)}: existing data violates it: {exc}"
+            ) from exc
+        return name
+
+    def _after_commit_schema(self) -> None:
+        """After a commit: pk constraints for new labels (pk_constraints),
+        then pk indexes for new shapes (auto_pk_indexes). Never raises."""
+        if self._pk_constraints:
+            pending = {shape for shape in self._pk_shapes if shape[0] not in self._constrained_labels}
+            if pending:
+                try:
+                    self.ensure_pk_constraints(pending)
+                except Exception as exc:  # noqa: BLE001 - reported, never fatal
+                    warnings.warn(
+                        f"cvcdocdb: could not create pk constraint(s) for {sorted(pending)}: {exc}",
+                        RuntimeWarning,
+                        stacklevel=3,
+                    )
+                self._constrained_labels |= {label for label, _ in pending}
+                # Els índexs d'una etiqueta amb restricció ja hi són (els de la restricció).
+                self._indexed_pk_shapes |= pending
+        self._auto_index_new_pk_shapes()
 
     def _auto_index_new_pk_shapes(self) -> None:
         """``auto_pk_indexes``: index pk shapes seen since the last commit.
@@ -1568,6 +1797,8 @@ class Neo4jGraph:
         replace: bool = False,
     ) -> int:
         shape = _pk_shape(node.main_label, node._primary_key)
+        if self._pk_constraints and node.main_label:
+            self._check_single_pk_shape(node.main_label, shape)
         if shape is not None:
             self._pk_shapes.add(shape)
         # Validate every label (main_label + alternative_labels), not just
