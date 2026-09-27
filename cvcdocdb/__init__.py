@@ -1,4 +1,10 @@
-__version__ = "1.0.0"
+from importlib.metadata import PackageNotFoundError, version as _version
+
+try:
+    # Single source of truth: VERSION in setup.py, via the installed metadata.
+    __version__ = _version("cvcdocdb")
+except PackageNotFoundError:  # running from a source tree that isn't installed
+    __version__ = "0.0.0.dev0"
 
 from .base import *
 from .drm_entities import *

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `cvcdocdb.__version__` was stuck at `1.0.0`; it now reports the installed version.
+
 ## [1.3.0] - 2026-09-27
 
 ### Added
