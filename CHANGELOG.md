@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-09-27
+
 ### Added
 
 - **Bounded waits, so a stuck writer or an unresponsive Neo4j server can't
