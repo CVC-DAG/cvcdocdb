@@ -7,6 +7,20 @@ with FK validation, cascade delete, and WeakNode parent propagation.
 from contextlib import contextmanager
 
 from neo4j import GraphDatabase
+
+# Enumeració per filtrar notificacions (veure _deprecation_filter_session_kwargs).
+# Importada aquí, al costat de GraphDatabase, perquè vingui sempre del mateix
+# lloc que el driver (també si un test el substitueix per un mock).
+try:  # neo4j driver >= 5.22 (les "categories" 5.x són obsoletes a la 6.x)
+    from neo4j import NotificationDisabledClassification as _DisabledNotification
+    _DISABLED_NOTIFICATIONS_KEY = "notifications_disabled_classifications"
+except ImportError:  # pragma: no cover - depèn de la versió del driver
+    try:
+        from neo4j import NotificationDisabledCategory as _DisabledNotification
+        _DISABLED_NOTIFICATIONS_KEY = "notifications_disabled_categories"
+    except ImportError:  # driver anterior a la 5.7: sense filtres
+        _DisabledNotification = None
+        _DISABLED_NOTIFICATIONS_KEY = ""
 from neo4j.exceptions import ConstraintError, Forbidden, TransactionError
 from . import Node, Relation, WeakRelation
 from typing import Any, Callable, Dict, Iterator, List, Optional, Set, Tuple, Union
@@ -31,6 +45,36 @@ PK_CONSTRAINT_PREFIX = "cvcdocdb_pkc_"
 _NODE_KEY_UNSUPPORTED_MARKERS = ("enterprise", "not supported", "unsupported")
 #: Pk entries that are not node properties (the backend's internal id).
 _INTERNAL_PK_KEYS = frozenset({"neo4j_id"})
+
+
+#: First Bolt version whose sessions accept notification filters (Neo4j 5.7).
+_NOTIFICATION_FILTER_MIN_BOLT = (5, 2)
+
+
+def _deprecation_filter_session_kwargs(
+    protocol_version: Tuple[int, ...], driver_config: Dict[str, Any]
+) -> Dict[str, Any]:
+    """Session options that silence the server's DEPRECATION notifications.
+
+    cvcdocdb uses ``id()`` throughout (its public node ids are integers;
+    ``elementId()`` returns strings, a breaking change kept for the next
+    major version), and Neo4j 5 flags every such query as deprecated: a
+    migration logged hundreds of warnings, hiding the real ones. Only the
+    DEPRECATION category is filtered — any other notification (e.g. an
+    unknown property) still reaches the log.
+
+    Returns no options when the server predates notification filters
+    (Bolt < 5.2 / Neo4j < 5.7, where they'd make the session fail), when the
+    driver doesn't support them, or when the caller passed its own
+    ``notifications_*`` settings (then those apply, untouched).
+    """
+    if any(key.startswith("notifications_") for key in driver_config):
+        return {}
+    if tuple(protocol_version[:2]) < _NOTIFICATION_FILTER_MIN_BOLT:
+        return {}
+    if _DisabledNotification is None:
+        return {}
+    return {_DISABLED_NOTIFICATIONS_KEY: [_DisabledNotification.DEPRECATION]}
 
 
 def _pk_shape(main_label: Optional[str], pk: Optional[Dict[str, Any]]) -> Optional[Tuple[str, Tuple[str, ...]]]:
@@ -297,14 +341,13 @@ class Neo4jGraph:
         self._closed = False
         # Internal tracking: neo4j_id -> pk dict (for get_node_pks)
         self._node_pks: Dict[int, Dict[str, Any]] = {}
-        if database is None:
-            self._session = self._driver.session()
-        else:
-            self._session = self._driver.session(database=database)
-        # self._version = list(list(self._session._pool.connections.values())[0])[
-        #    0
-        # ].PROTOCOL_VERSION[0]
-        self._version = self._driver.get_server_info().protocol_version[0]
+        # Server version first: the session's notification filter depends on it.
+        server_protocol = self._driver.get_server_info().protocol_version
+        self._version = server_protocol[0]
+        session_kwargs = _deprecation_filter_session_kwargs(server_protocol, driver_config)
+        if database is not None:
+            session_kwargs["database"] = database
+        self._session = self._driver.session(**session_kwargs)
         # FK index: neo4j_id → set of (other_id, rel_type, direction)
         # direction: "out" = edge starts here, "in" = edge ends here
         self._fk_index: Dict[int, Set[Tuple[int, str, str]]] = {}
