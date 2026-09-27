@@ -81,6 +81,16 @@ shapes) makes `ensure_pk_constraints` fail with a clear `ValueError`.
    `graph.ensure_pk_constraints([(label, pk_props), ...])` — it reports any
    data that prevents them.
 
+**Don't share a database between 1.x and 2.0 clients.** The 2.0
+constraints pin each label to one pk shape for every client of that
+database: a 1.x client (or test suite) that inserts another shape for the
+same label then gets constraint violations, and 1.x `ensure_pk_indexes`
+can't create an index on a schema that already has a constraint. Found
+while testing: a 2.0 test run left constraints in a shared test database
+and the 1.x suite failed on it. The 2.0 test suite now drops its
+`cvcdocdb_pk*` constraints/indexes at session end (`conftest.py`), using the
+real driver captured at import time (`test_drm.py` stubs `neo4j`).
+
 **Open question before cutting 2.0.** `NetworkXGraph` doesn't enforce the
 one-shape rule yet, so the two backends now differ on graphs with several
 pk shapes per label. Decide whether `NetworkXGraph` gets the same rule

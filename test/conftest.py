@@ -47,6 +47,15 @@ _DOCKER_NEO4J_HTTP_PORT = 7474
 _docker_neo4j_container = None
 
 
+# El driver REAL, capturat en carregar el conftest (abans de cap test):
+# test_drm.py substitueix `neo4j` per un mock a sys.modules en importar-se, i
+# pytest_sessionfinish (que corre al final) hi trobaria el mock.
+try:
+    from neo4j import GraphDatabase as _REAL_GRAPH_DATABASE
+except ImportError:  # pragma: no cover - driver no instal·lat
+    _REAL_GRAPH_DATABASE = None
+
+
 def _neo4j_reachable(timeout: float = 0.5) -> bool:
     """Quick TCP probe so unreachable-Neo4j runs skip fast instead of timing out.
 
@@ -129,6 +138,38 @@ def _maybe_start_docker_neo4j() -> None:
         f"[conftest] Started local Neo4j docker container "
         f"({_DOCKER_NEO4J_IMAGE}) on bolt://localhost:{_DOCKER_NEO4J_BOLT_PORT}"
     )
+
+
+def pytest_sessionfinish(session, exitstatus):
+    """Des de la 2.0, qualsevol Neo4jGraph crea restriccions de pk per
+    defecte (``cvcdocdb_pkc_<Label>``). Els tests les netegen en començar,
+    però les últimes quedarien a la base en acabar la sessió i lligarien
+    etiquetes a la forma de pk d'aquests tests per a qualsevol altre client
+    (p. ex. la suite 1.x sobre la mateixa base de proves). S'esborren aquí,
+    en acabar. Best-effort: mai fa fallar la sessió."""
+    if not _neo4j_reachable():
+        return
+    url = os.environ.get("NEO4J_DEV_URL") or os.environ.get("NEO4J_URL")
+    user = os.environ.get("NEO4J_DEV_USER") or os.environ.get("NEO4J_USER")
+    password = os.environ.get("NEO4J_DEV_PASSWORD") or os.environ.get("NEO4J_PASSWORD")
+    database = os.environ.get("NEO4J_DEV_DATABASE") or os.environ.get("NEO4J_DATABASE") or None
+    if not (url and user and password) or _REAL_GRAPH_DATABASE is None:
+        return
+    try:
+        with _REAL_GRAPH_DATABASE.driver(url, auth=(user, password)) as driver:
+            for record in driver.execute_query(
+                "SHOW CONSTRAINTS YIELD name WHERE name STARTS WITH 'cvcdocdb_pk' RETURN name",
+                database_=database,
+            )[0]:
+                driver.execute_query(f"DROP CONSTRAINT `{record['name']}` IF EXISTS", database_=database)
+            for record in driver.execute_query(
+                "SHOW INDEXES YIELD name, owningConstraint WHERE name STARTS WITH 'cvcdocdb_pk' "
+                "AND owningConstraint IS NULL RETURN name",
+                database_=database,
+            )[0]:
+                driver.execute_query(f"DROP INDEX `{record['name']}` IF EXISTS", database_=database)
+    except Exception as exc:  # noqa: BLE001 - neteja best-effort
+        print(f"\n[conftest] No s'han pogut netejar les restriccions/índexs de pk de cvcdocdb: {exc}")
 
 
 def pytest_configure(config):

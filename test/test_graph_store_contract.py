@@ -605,6 +605,12 @@ class TestNeo4jGraph(unittest.TestCase):
     @classmethod
     def tearDownClass(cls) -> None:
         if cls._graph is not None:
+            # No deixar restriccions de pk a la base en acabar: un altre
+            # client (p. ex. cvcdocdb 1.x, o tests d'una altra branca) hi
+            # trobaria etiquetes lligades a la forma de pk d'aquests tests.
+            cls._graph._tx = None
+            cls._graph._closed = False
+            _reset_neo4j_pk_schema(cls._graph)
             cls._graph.close()
 
     def _make_graph(self) -> GraphStore:
