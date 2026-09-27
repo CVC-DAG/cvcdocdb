@@ -46,6 +46,8 @@ class MigrationStats:
     #: of aborting the whole migration (only populated when
     #: ``on_error="skip"``).
     errors: List[str] = field(default_factory=list)
+    #: Pk indexes created on *target* (``migrate(create_indexes=True)``).
+    pk_indexes_created: int = 0
 
 
 def migrate(
@@ -57,6 +59,7 @@ def migrate(
     replace: bool = False,
     chunk_size: int = _DEFAULT_CHUNK_SIZE,
     on_error: str = "raise",
+    create_indexes: bool = False,
 ) -> MigrationStats:
     """Copy an entire graph from *source* into *target*, in three phases:
     **nodes**, then **edges**, then **vector indexes**.
@@ -149,6 +152,12 @@ def migrate(
             records it in ``MigrationStats.errors`` and continues with
             the rest — useful for a best-effort migration of a large,
             possibly messy graph.
+        create_indexes: If True, after the migration commits, create on
+            *target* the pk indexes for every pk shape migrated (see
+            ``GraphStore.ensure_pk_indexes``; a no-op on ``NetworkXGraph``).
+            Counted in ``MigrationStats.pk_indexes_created``. Only shapes
+            whose pk the source really knows are indexed (a ``Neo4jGraph``
+            source reports ``pk=None`` — see above — and is skipped).
 
     Returns:
         A :class:`MigrationStats` with the counts of what was copied.
@@ -171,6 +180,7 @@ def migrate(
     with _maybe_batch(source, write=False), _maybe_batch(target, write=True):
         # -- Phase 1: nodes ---------------------------------------------
         identities: Dict[Any, Tuple[str, Dict[str, Any]]] = {}
+        pk_shapes: set = set()
         node_ids = source.get_node_ids()
 
         for i in range(0, len(node_ids), chunk_size):
@@ -203,6 +213,10 @@ def migrate(
                     continue
 
                 identities[old_id] = (main_label, pk)
+                if attrs.get("pk") is not None:
+                    props = tuple(sorted(k for k in pk if k != "neo4j_id"))
+                    if props:
+                        pk_shapes.add((main_label, props))
                 stats.nodes_migrated += 1
 
         # -- Phase 2: edges -----------------------------------------------
@@ -241,6 +255,16 @@ def migrate(
                     raise
                 stats.errors.append(f"vector index {index_meta.get('property_name')}: {exc}")
                 stats.indexes_skipped += 1
+
+    # -- Phase 4: pk indexes (after commit: Neo4j forbids schema changes in
+    # a transaction that also wrote data) -------------------------------
+    if create_indexes and pk_shapes:
+        try:
+            stats.pk_indexes_created = len(target.ensure_pk_indexes(pk_shapes))
+        except Exception as exc:  # noqa: BLE001
+            if on_error == "raise":
+                raise
+            stats.errors.append(f"pk indexes: {exc}")
 
     return stats
 

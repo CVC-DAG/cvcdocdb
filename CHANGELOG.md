@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Primary-key indexes on Neo4j** (backward-compatible: nothing changes
+  unless you ask for it). Every `insertNode`/pk lookup runs
+  `MATCH (n:Label) WHERE <pk>`, which without an index scans every node of
+  the label — a full migration grew quadratically.
+  - `GraphStore.ensure_pk_indexes(pk_shapes=None)`: creates a non-unique
+    index per `(main_label, pk properties)` shape (named
+    `cvcdocdb_pk_<Label>_<props>`), reusing any equivalent existing index.
+    Several pk shapes per label are fine (one index each), so this keeps
+    the current "same label, different pk shapes" design. No-op on
+    `NetworkXGraph`, which has its own in-memory pk index.
+  - `Neo4jGraph(..., auto_pk_indexes=False)`: when True, indexes new pk
+    shapes right after each commit (a standalone `insertNode` or a whole
+    `batch()`); a failure only warns, the data is already committed.
+  - `migrate(..., create_indexes=False)`: when True, indexes on *target*
+    every pk shape migrated, after the migration commits
+    (`MigrationStats.pk_indexes_created`).
+  - Requires `INDEX MANAGEMENT` on the database (`PermissionError`
+    otherwise), and never runs inside `batch()` (`RuntimeError`): Neo4j
+    forbids schema changes in a transaction that also writes data.
+
 ### Fixed
 
 - `cvcdocdb.__version__` was stuck at `1.0.0`; it now reports the installed version.
