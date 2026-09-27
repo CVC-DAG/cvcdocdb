@@ -43,6 +43,7 @@ class NetworkXGraph(GraphStore):
         self,
         persistence_path: Optional[str] = None,
         lock_timeout: Optional[float] = None,
+        pk_constraints: bool = True,
     ) -> None:
         """
         Args:
@@ -54,12 +55,22 @@ class NetworkXGraph(GraphStore):
                 :class:`~cvcdocdb.graph_store.GraphLockTimeout`. ``None``
                 (default) waits forever, as before.
 
+            pk_constraints: If True (the default since 2.0), each label has
+                a single pk shape, as on ``Neo4jGraph``: inserting a node
+                whose pk shape differs from its label's raises
+                ``ValueError``. Each label's shape is saved in the
+                persistence file, so the rule holds across instances and
+                processes. ``False`` restores the 1.x behaviour.
+
         Raises:
             ValueError: If *lock_timeout* is negative.
         """
         if lock_timeout is not None and lock_timeout < 0:
             raise ValueError(f"lock_timeout must be >= 0 or None, got {lock_timeout!r}")
         self._lock_timeout = lock_timeout
+        self._pk_constraints = pk_constraints
+        # label -> pk props: the single pk shape of each label (2.0 rule).
+        self._label_pk_shapes: Dict[str, Tuple[str, ...]] = {}
         self._graph: nx.MultiDiGraph = nx.MultiDiGraph()
         self._node_attrs: Dict[int, Dict[str, Any]] = {}
         self._edge_attrs: Dict[Tuple[int, int, str], Dict[str, Any]] = {}
@@ -1217,6 +1228,10 @@ class NetworkXGraph(GraphStore):
             and node._parent._primary_key is not None
             and node._primary_key == node._parent._primary_key
         )
+        if self._pk_constraints and node.main_label:
+            self._check_single_pk_shape(
+                node.main_label, None if is_backend_assigned_pk else node._primary_key
+            )
 
         existing = self.checkNode(node) if not is_backend_assigned_pk else None
 
@@ -1284,6 +1299,47 @@ class NetworkXGraph(GraphStore):
 
         self._graph.add_node(node_id, **props)
         return node_id
+
+    # ------------------------------------------------------------------
+    # 2.0: one pk shape per label (same rule as Neo4jGraph(pk_constraints))
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _pk_props(pk: Optional[Dict[str, Any]]) -> Tuple[str, ...]:
+        return tuple(sorted(k for k in (pk or {}) if k != "neo4j_id"))
+
+    def _check_single_pk_shape(self, main_label: str, pk: Optional[Dict[str, Any]]) -> None:
+        """Raise ``ValueError`` before anything is written if *pk*'s shape
+        differs from the label's; the first real pk shape inserted for a
+        label becomes its shape (a node without pk doesn't set one)."""
+        props = self._pk_props(pk)
+        known = self._label_pk_shapes.get(main_label)
+        if known is None:
+            if props:
+                self._label_pk_shapes[main_label] = props
+            return
+        if props != known:
+            raise ValueError(
+                f"Label {main_label!r} already uses pk {list(known)}; got {list(props) or 'no pk'}. "
+                "Since cvcdocdb 2.0 each label has a single pk shape; use another label, "
+                "or pk_constraints=False for the 1.x behaviour."
+            )
+
+    def _rebuild_label_pk_shapes(self) -> Dict[str, Tuple[str, ...]]:
+        """Label shapes for a persistence file saved before 2.0 (no
+        ``label_pk_shapes``): the pk of each label's first node, skipping
+        backend-assigned ids (``pk == {"id": <its own node id>}``)."""
+        shapes: Dict[str, Tuple[str, ...]] = {}
+        for node_id in sorted(self._node_attrs):
+            attrs = self._node_attrs[node_id]
+            pk = attrs.get("pk")
+            label = attrs.get("main_label")
+            if not label or not isinstance(pk, dict) or pk == {"id": node_id}:
+                continue
+            props = self._pk_props(pk)
+            if props:
+                shapes.setdefault(label, props)
+        return shapes
 
     def _resolve_node_id(self, node_data: Union[Node, Dict[str, Any]]) -> Optional[int]:
         """Resolve a node or node dict to its internal graph id."""
@@ -1583,6 +1639,7 @@ class NetworkXGraph(GraphStore):
             "pk_index": self._pk_index,
             "property_index": self._property_index,
             "vector_index_meta": self._vector_index_meta,
+            "label_pk_shapes": self._label_pk_shapes,
         }
         parent_dir = os.path.dirname(self._persistence_path)
         if parent_dir:
@@ -1628,6 +1685,10 @@ class NetworkXGraph(GraphStore):
         self._pk_index = state.get("pk_index", {})
         self._property_index = state.get("property_index", {})
         self._vector_index_meta = state.get("vector_index_meta", {})
+        saved_shapes = state.get("label_pk_shapes")
+        self._label_pk_shapes = (
+            dict(saved_shapes) if saved_shapes is not None else self._rebuild_label_pk_shapes()
+        )
         # Backward compatibility with older persistence files without indexes.
         if not self._pk_index and self._node_attrs:
             self._rebuild_indexes()

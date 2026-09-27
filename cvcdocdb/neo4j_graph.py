@@ -1785,7 +1785,16 @@ class Neo4jGraph:
         update: bool = False,
         replace: bool = False,
     ) -> int:
-        shape = _pk_shape(node.main_label, node._primary_key)
+        # Mateixa semàntica que NetworkXGraph: un WeakNode amb id assignat pel
+        # backend porta de moment la pk del pare — per a la seva etiqueta, és
+        # "sense pk", no la forma del pare.
+        is_backend_assigned_pk = (
+            node["is_weak"]
+            and node._parent is not None
+            and node._parent._primary_key is not None
+            and node._primary_key == node._parent._primary_key
+        )
+        shape = None if is_backend_assigned_pk else _pk_shape(node.main_label, node._primary_key)
         if self._pk_constraints and node.main_label:
             self._check_single_pk_shape(node.main_label, shape)
         if shape is not None:

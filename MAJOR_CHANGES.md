@@ -91,7 +91,21 @@ and the 1.x suite failed on it. The 2.0 test suite now drops its
 `cvcdocdb_pk*` constraints/indexes at session end (`conftest.py`), using the
 real driver captured at import time (`test_drm.py` stubs `neo4j`).
 
-**Open question before cutting 2.0.** `NetworkXGraph` doesn't enforce the
-one-shape rule yet, so the two backends now differ on graphs with several
-pk shapes per label. Decide whether `NetworkXGraph` gets the same rule
-(consistent, but breaking for NetworkX users too) or stays permissive.
+**NetworkXGraph applies the same rule** (decided: backend parity is
+cvcdocdb's core promise — the same code must behave the same on any
+backend). `NetworkXGraph(..., pk_constraints=True)` is the new default too:
+a second pk shape for a label raises the same `ValueError`, before anything
+is written. With no database constraints to read from, each label's shape
+is saved in the persistence file (`label_pk_shapes` in the pickle), so the
+rule holds across instances and processes; a pre-2.0 pickle is rebuilt from
+its nodes (each label's first real pk, skipping backend-assigned ids).
+`pk_constraints=False` restores the 1.x behaviour. `ensure_pk_constraints`
+stays a no-op there (the rule itself is the constraint). Same semantics on
+both backends for nodes without a pk: they don't set a label's shape, but
+are rejected on a label that has one; a `WeakNode` with a backend-assigned
+id counts as "no pk" for its own label (not its parent's shape).
+
+**Measured impact** (2026-09-27): cvcdocdb's own suite needed no test
+changes for NetworkX (each test uses a fresh pickle); on Neo4j, the tests
+had to reset the pk schema between tests. A real downstream graph checked
+(the ABCDs app's, 27 labels) had no label with mixed pk shapes.

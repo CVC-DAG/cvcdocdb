@@ -16,6 +16,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   label after each commit (needs `CONSTRAINT MANAGEMENT`). New
   `GraphStore.ensure_pk_constraints()` and `migrate(create_constraints=...)`.
   `pk_constraints=False` restores the 1.x behaviour.
+- **NetworkXGraph: the same one-pk-shape-per-label rule**
+  (`NetworkXGraph(pk_constraints=True)` is the new default), so both
+  backends behave the same. Each label's shape is saved in the persistence
+  file (rebuilt from the nodes for pre-2.0 pickles). `pk_constraints=False`
+  restores the 1.x behaviour.
 
 ### Added
 
