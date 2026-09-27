@@ -532,6 +532,13 @@ def neo4j_store():
         graph._tx.run("MATCH (n) DETACH DELETE n")
         graph._tx.commit()
         graph._tx = None
+        # pk constraints/indexes left by other tests would impose their pk
+        # shapes on this module's labels (e.g. Document).
+        for kind, plural in (("CONSTRAINT", "CONSTRAINTS"), ("INDEX", "INDEXES")):
+            for row in list(graph._session.run(
+                f"SHOW {plural} YIELD name WHERE name STARTS WITH 'cvcdocdb_pk' RETURN name"
+            )):
+                graph._session.run(f"DROP {kind} `{row['name']}` IF EXISTS").consume()
 
     _wipe()
     yield graph

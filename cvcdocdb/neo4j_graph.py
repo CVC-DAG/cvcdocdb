@@ -1067,6 +1067,17 @@ class Neo4jGraph:
                     f"Can't create the pk constraint on {label}{list(props)}: existing data violates it "
                     f"(duplicates, missing pk properties or several pk shapes): {exc}"
                 ) from exc
+        # Community: IS UNIQUE doesn't require the pk properties to exist, so
+        # check what NODE KEY would have enforced (e.g. mixed pk shapes).
+        missing = " OR ".join(f"n.`{p}` IS NULL" for p in props)
+        [row] = self._session.run(
+            f"MATCH (n:`{label}`) WHERE {missing} RETURN count(n) AS c"
+        )
+        if row["c"]:
+            raise ValueError(
+                f"Can't create the pk constraint on {label}{list(props)}: {row['c']} existing "
+                f"{label} node(s) lack some of these pk properties (several pk shapes?)"
+            )
         name, statement = _pk_constraint_statement(label, props, node_key=False)  # Community
         try:
             self._session.run(statement).consume()
