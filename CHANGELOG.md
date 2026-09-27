@@ -31,6 +31,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Neo4jGraph no longer floods the log with `id()` deprecation notices.**
+  cvcdocdb uses `id()` throughout (its public node ids are integers;
+  `elementId()` returns strings, a breaking change kept for the next major
+  version) and Neo4j 5 logs a deprecation notice per query: a
+  ~100-node migration logged 479 of them, hiding the real warnings. The
+  graph's own session now filters the DEPRECATION notification category —
+  only that one, other notifications (e.g. unknown properties) still reach
+  the log — when the server supports notification filters (Bolt 5.2+ /
+  Neo4j 5.7+; older servers get no filter) and the caller didn't pass its
+  own `notifications_*` driver settings.
 - `cvcdocdb.__version__` was stuck at `1.0.0`; it now reports the installed version.
 
 ## [1.3.0] - 2026-09-27
