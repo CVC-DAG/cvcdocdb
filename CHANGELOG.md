@@ -58,6 +58,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   environment: install from source with `pip install -e . -r
   requirements.txt`. A test builds the package as it is published and
   checks the wheel's metadata.
+  - When an optional dependency is missing, the error now names the extra
+    to install (e.g. `pip install "cvcdocdb[rdf]"`, `cvcdocdb[schema]`,
+    `cvcdocdb[vector]`, `cvcdocdb[torch]`) instead of the bare package,
+    so an application knows what to add to its own requirements. The
+    `torch_dataloader` messages, previously in Catalan, are now in English
+    like the rest.
 
 - **`NetworkXGraph.query(cypher)` gave wrong results for many basic read
   queries** — `WHERE` was ignored except for `=`, labelled relationship

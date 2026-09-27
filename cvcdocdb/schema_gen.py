@@ -142,7 +142,7 @@ def generate_classes(yaml_source: str) -> str:
     if yaml is None:
         raise ImportError(
             "PyYAML is required for schema generation. "
-            "Install it with: pip install pyyaml"
+            'Install it with: pip install "cvcdocdb[schema]"'
         )
 
     data = yaml.safe_load(yaml_source)

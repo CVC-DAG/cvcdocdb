@@ -1062,7 +1062,10 @@ class NetworkXGraph(GraphStore):
         The property values must be 1D vectors with exactly ``dimensions`` items.
         """
         if hnswlib is None:
-            raise RuntimeError("hnswlib is required for vector indexing")
+            raise RuntimeError(
+                "hnswlib is required for vector indexing. "
+                'Install it with: pip install "cvcdocdb[vector]"'
+            )
         if dimensions <= 0:
             raise ValueError("dimensions must be > 0")
         if space not in ("cosine", "l2", "ip"):
@@ -1632,7 +1635,10 @@ class NetworkXGraph(GraphStore):
         self._vector_indexes = {}
         if self._vector_index_meta:
             if hnswlib is None:
-                raise RuntimeError("hnswlib is required to load persisted vector indexes")
+                raise RuntimeError(
+                    "hnswlib is required to load persisted vector indexes. "
+                    'Install it with: pip install "cvcdocdb[vector]"'
+                )
             for prop_name, meta in self._vector_index_meta.items():
                 idx = hnswlib.Index(space=meta["space"], dim=meta["dimensions"])
                 vector_path = self._vector_index_file(prop_name)
@@ -1763,7 +1769,10 @@ class NetworkXGraph(GraphStore):
     ) -> None:
         """Create and register an empty hnswlib index for one property."""
         if hnswlib is None:
-            raise RuntimeError("hnswlib is required for vector indexing")
+            raise RuntimeError(
+                "hnswlib is required for vector indexing. "
+                'Install it with: pip install "cvcdocdb[vector]"'
+            )
 
         idx = hnswlib.Index(space=space, dim=dimensions)
         idx.init_index(
