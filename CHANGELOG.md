@@ -47,6 +47,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The published wheel declared no dependencies.** `setup.py` read
+  `requirements.txt`, which isn't shipped in the sdist, so the wheel built
+  from it had an empty `install_requires` and users had to install `neo4j`,
+  `filelock`... by hand. Runtime dependencies are now declared in
+  `setup.py` (`neo4j`, `networkx`, `numpy`, `filelock`, `tqdm`), with
+  optional features as extras: `rdf`, `schema`, `vector`, `torch`,
+  `graphrag`. `requirements.txt` (which also lists development-only tools
+  such as `sphinx` and `notebook`) is now only for the development
+  environment: install from source with `pip install -e . -r
+  requirements.txt`. A test builds the package as it is published and
+  checks the wheel's metadata.
+
 - **`NetworkXGraph.query(cypher)` gave wrong results for many basic read
   queries** — `WHERE` was ignored except for `=`, labelled relationship
   patterns (`(a:A)-[:R]->(b:B)`) matched nothing, `ORDER BY`/`SKIP`,
