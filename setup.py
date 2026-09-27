@@ -20,17 +20,30 @@ def get_long_description():
     return ""
 
 
-def get_requirements():
-    reqs = []
-    path = os.path.join(os.path.abspath(os.path.dirname(__file__)), "requirements.txt")
-    if os.path.exists(path):
-        with open(path, encoding="utf-8") as fh:
-            for line in fh:
-                line = line.strip()
-                # Skip empty lines and lines that are not actual package names (e.g. -rtd-theme)
-                if line and not line.startswith("-") and not line.startswith("#"):
-                    reqs.append(line)
-    return reqs
+# Runtime dependencies are declared here, not read from requirements.txt:
+# that file isn't shipped in the sdist (so the published wheel ended up
+# declaring no dependencies at all), and it also lists development-only
+# tools (sphinx, notebook...). requirements.txt is for the dev environment.
+INSTALL_REQUIRES = [
+    "neo4j",
+    "networkx",
+    "numpy",
+    "filelock",
+    "tqdm",
+]
+
+EXTRAS_REQUIRE = {
+    # RDF/OWL ontology import (cvcdocdb.rdf_schema).
+    "rdf": ["rdflib", "pyyaml"],
+    # Entity-class generation from a YAML schema (cvcdocdb.schema_gen).
+    "schema": ["pyyaml"],
+    # Vector indexes on NetworkXGraph (enable_vector_index / query_vector_index).
+    "vector": ["hnswlib"],
+    # PyTorch / PyG data loaders (cvcdocdb.torch_dataloader).
+    "torch": ["torch", "torch_geometric"],
+    # Natural-language → Cypher (cvcdocdb.text2cypher); needs Python >= 3.10.
+    "graphrag": ["neo4j-graphrag>=1.21,<2"],
+}
 
 
 setup(
@@ -45,7 +58,8 @@ setup(
     license=LICENSE,
     packages=PACKAGES,
     package_dir={"": "."},
-    install_requires=get_requirements(),
+    install_requires=INSTALL_REQUIRES,
+    extras_require=EXTRAS_REQUIRE,
     keywords=["document representation", "knowledge graph", "neo4j", "networkx", "document analysis"],
     classifiers=[
         "Development Status :: 4 - Beta",

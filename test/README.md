@@ -1,6 +1,6 @@
 # Tests
 
-Three levels of tests, organized with pytest markers:
+Four levels of tests, organized with pytest markers:
 
 ## Levels
 
@@ -9,6 +9,7 @@ Three levels of tests, organized with pytest markers:
 | **Unit** | `pytest -m unit` | 80 | ~2s | Fast, no graph store (Node, Relation, schema generation) |
 | **Integration** | `pytest -m integration` | ~180 | ~3s | NetworkXGraph tests (in-memory, no Neo4j required) |
 | **Neo4j** | `pytest -m slow` | 44 | ~2s locally (skipped) | Neo4j integration tests (require real Neo4j connection) |
+| **Release** | `pytest -m release` | 3 | ~30s (requires Neo4j) | Cross-backend migration + schema codegen comparison — run on `main`, right before publishing a new version |
 
 ## Usage
 
@@ -37,6 +38,24 @@ test is auto-skipped with a clear reason instead of failing/erroring on a
 connection timeout — this is what keeps a plain `pytest test/` fast (~5s)
 even without a local Neo4j instance running. When a real server is reachable,
 those tests run normally.
+
+### Release tests
+
+`test_release_schema_migration.py` covers `cvcdocdb.migration.migrate()` and
+`cvcdocdb.schema_gen.generate_classes()` end to end: migrating a real dataset
+between `NetworkXGraph` and `Neo4jGraph` and comparing the Python entity-class
+code generated from each side's live schema (they must declare the same
+classes and properties). These tests are **skipped by default** — even with
+`pytest -m slow` — because they're the most expensive in the suite and only
+meaningful right before a release. Run them explicitly:
+
+```bash
+# Requires a reachable Neo4j (NEO4J_DEV_* env vars)
+CVCDOCDB_RUN_RELEASE_TESTS=1 pytest test/ -m release -v
+```
+
+Run this on `main`, after merging `develop` in and bumping `VERSION`, right
+before `python -m build && twine upload`.
 
 ### Automatic local Neo4j via Docker
 

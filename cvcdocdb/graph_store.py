@@ -25,6 +25,12 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 from .base import Node, Relation
 
 
+class GraphLockTimeout(TimeoutError):
+    """A graph store's write lock could not be acquired within the configured
+    timeout (e.g. ``NetworkXGraph(lock_timeout=...)``) — another process or
+    instance is holding it, typically a long or stuck write/migration."""
+
+
 class GraphStore(ABC):
     """Abstract interface for graph-backed stores (Neo4j, NetworkX, etc.).
 
@@ -202,6 +208,30 @@ class GraphStore(ABC):
         raise NotImplementedError(
             f"Count is not supported by {self.__class__.__name__}."
         )
+
+    # ------------------------------------------------------------------
+    # Optional primary-key index API (concrete default)
+    # ------------------------------------------------------------------
+
+    def ensure_pk_indexes(
+        self,
+        pk_shapes: Optional[Any] = None,
+    ) -> List[str]:
+        """Create the database indexes backing primary-key lookups, if the
+        backend needs them. Idempotent.
+
+        Args:
+            pk_shapes: Iterable of ``(main_label, pk_property_names)``. When
+                omitted, the backend uses the shapes it has seen inserted.
+
+        Returns:
+            The names of the indexes created by this call (empty when there
+            was nothing to create).
+
+        The default is a no-op: backends that keep their own in-memory pk
+        index (``NetworkXGraph``) need nothing else.
+        """
+        return []
 
     # ------------------------------------------------------------------
     # Optional vector index API (concrete default)

@@ -19,6 +19,8 @@ Features
 * **Query and filtering**: Secondary index on scalar properties, multi-filter search with intersection/union, debug snapshots
 * **Vector search (NetworkX only)**: HNSW-based ANN indexing on node properties with ``cosine``, ``l2``, and ``ip`` distance spaces
 * **RDF/OWL ontology conversion**: Generate Python entity classes from RDF/OWL ontologies (RiC-O, etc.)
+* **Backend-to-backend migration**: ``cvcdocdb.migration.migrate()`` copies an entire graph -- nodes, edges, and vector indexes -- between any two ``GraphStore`` backends
+* **PyTorch / PyTorch Geometric dataloader**: ``cvcdocdb.torch_dataloader`` streams a graph into PyG-ready tensors for node embedding models (``MetaPath2Vec``) and link prediction
 
 Installation
 ------------
@@ -27,11 +29,20 @@ Install from PyPI::
 
     pip install cvcdocdb
 
-Or install from source in development mode::
+Optional features are installed as extras, e.g. ``pip install "cvcdocdb[rdf,vector]"``:
+
+* ``rdf`` -- RDF/OWL ontology import (``cvcdocdb.rdf_schema``)
+* ``schema`` -- entity-class generation from a YAML schema (``cvcdocdb.schema_gen``)
+* ``vector`` -- vector indexes on ``NetworkXGraph``
+* ``torch`` -- PyTorch / PyG data loaders (``cvcdocdb.torch_dataloader``)
+* ``graphrag`` -- ``Text2Cypher`` on a ``Neo4jGraph`` (Python >= 3.10)
+
+Or install from source in development mode (``requirements.txt`` adds the
+documentation/notebook tools and some optional dependencies used for development)::
 
     git clone https://github.com/CVC-DAG/cvcdocdb.git
     cd cvcdocdb
-    pip install -e .
+    pip install -e . -r requirements.txt
 
 Register the recommended Jupyter kernel for tutorials::
 
@@ -89,6 +100,7 @@ Datasets
 * ``movies`` -- Movie-domain graph (actors, genres, films)
 * ``game_of_thrones`` -- Character-house graph
 * ``bibliography_openalex`` -- OpenAlex bibliographic references with citations
+* ``torch_dataloader_bibliography`` -- PyTorch/PyTorch Geometric dataloader, MetaPath2Vec training, and link prediction on the bibliographic dataset
 
 Ontologies
 ~~~~~~~~~~

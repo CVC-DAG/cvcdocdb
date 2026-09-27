@@ -19,12 +19,16 @@ except ImportError:  # pragma: no cover - guarded at runtime in vector APIs
     hnswlib = None
 
 try:
-    from filelock import FileLock
+    from filelock import FileLock, Timeout as FileLockTimeout
 except ImportError:  # pragma: no cover - guarded at runtime in __init__
     FileLock = None
+    FileLockTimeout = None
 
 from .base import Node, Relation, WeakRelation
-from .graph_store import GraphStore
+from .graph_store import GraphLockTimeout, GraphStore
+
+# filelock's "wait forever" value for acquire(timeout=...).
+_WAIT_FOREVER = -1
 
 
 class NetworkXGraph(GraphStore):
@@ -35,7 +39,27 @@ class NetworkXGraph(GraphStore):
     without a real database.
     """
 
-    def __init__(self, persistence_path: Optional[str] = None) -> None:
+    def __init__(
+        self,
+        persistence_path: Optional[str] = None,
+        lock_timeout: Optional[float] = None,
+    ) -> None:
+        """
+        Args:
+            persistence_path: Pickle file backing the graph; defaults to a
+                per-workspace file under ``~/.cache/cvcdocdb``.
+            lock_timeout: Maximum seconds a mutating call (or ``batch()``,
+                including :func:`cvcdocdb.migration.migrate`) waits for the
+                cross-process file lock before raising
+                :class:`~cvcdocdb.graph_store.GraphLockTimeout`. ``None``
+                (default) waits forever, as before.
+
+        Raises:
+            ValueError: If *lock_timeout* is negative.
+        """
+        if lock_timeout is not None and lock_timeout < 0:
+            raise ValueError(f"lock_timeout must be >= 0 or None, got {lock_timeout!r}")
+        self._lock_timeout = lock_timeout
         self._graph: nx.MultiDiGraph = nx.MultiDiGraph()
         self._node_attrs: Dict[int, Dict[str, Any]] = {}
         self._edge_attrs: Dict[Tuple[int, int, str], Dict[str, Any]] = {}
@@ -490,9 +514,15 @@ class NetworkXGraph(GraphStore):
           ``main_label`` and node attributes.  Supports operators
           ``$eq``, ``$ne``, ``$gt``, ``$gte``, ``$lt``, ``$lte``,
           ``$in``, ``$nin``, ``$exists``, ``$regex``.
-        * **str** — a Cypher query string (``MATCH``, ``CREATE``,
-          ``DELETE``, ``SET``, ``RETURN``, ``ORDER BY``, ``LIMIT``,
-          aggregations, parameter substitution via ``$name``).
+        * **str** — a Cypher query string. Read-only queries are parsed
+          and evaluated with Neo4j semantics by :mod:`cvcdocdb.nx_cypher`
+          (``MATCH``/``OPTIONAL MATCH`` with node and relationship
+          patterns, ``WHERE``, ``WITH``, ``RETURN [DISTINCT]``,
+          ``ORDER BY``, ``SKIP``, ``LIMIT``, aggregations, common
+          functions, ``$name`` parameters); unsupported syntax raises
+          ``ValueError`` instead of returning wrong results. Write
+          queries (``CREATE``, ``MERGE``, ``SET``, ``DELETE``) use a
+          simpler clause-by-clause engine.
 
         Args:
             filter_dict: Filter dict for MongoDB-style queries, or Cypher
@@ -690,11 +720,14 @@ class NetworkXGraph(GraphStore):
             rel_types[rel_type]["src"].add(src_label)
             rel_types[rel_type]["dst"].add(dst_label)
 
-            # Collect edge properties
-            for k, val in data.items():
-                if k not in ("rel_type", "rel_type"):
-                    if k not in rel_types[rel_type]["props"]:
-                        rel_types[rel_type]["props"][k] = self._python_type(val)
+            # Collect edge properties — these live only in self._edge_attrs,
+            # never mirrored onto the raw networkx graph edge itself (see
+            # insertRelation, which only ever sets rel_type there), so
+            # `data` (the graph's own edge dict) is never enough.
+            edge_attrs = self._edge_attrs.get((u, v, rel_type), {})
+            for k, val in edge_attrs.items():
+                if k not in rel_types[rel_type]["props"]:
+                    rel_types[rel_type]["props"][k] = self._python_type(val)
 
         # ── Build YAML manually (no PyYAML dependency) ───────────────
         lines: List[str] = []
@@ -1029,7 +1062,10 @@ class NetworkXGraph(GraphStore):
         The property values must be 1D vectors with exactly ``dimensions`` items.
         """
         if hnswlib is None:
-            raise RuntimeError("hnswlib is required for vector indexing")
+            raise RuntimeError(
+                "hnswlib is required for vector indexing. "
+                'Install it with: pip install "cvcdocdb[vector]"'
+            )
         if dimensions <= 0:
             raise ValueError("dimensions must be > 0")
         if space not in ("cosine", "l2", "ip"):
@@ -1436,7 +1472,33 @@ class NetworkXGraph(GraphStore):
     # ------------------------------------------------------------------
 
     @contextmanager
-    def _guarded_write(self) -> Iterator[None]:
+    def batch(self, write: bool = True) -> Iterator[None]:
+        """Hold the cross-process write lock for the whole ``with`` block.
+
+        Groups multiple mutating calls (or a mix of reads and mutating
+        calls, as in :func:`cvcdocdb.migration.migrate`) under a single
+        acquisition of the file lock instead of one per call — mirrors
+        ``Neo4jGraph.batch()``'s transaction-grouping contract on this
+        backend. It's a write lock: other processes/instances calling any
+        mutating method (which all go through :meth:`_guarded_write`)
+        block until this block exits, while reads (which never touch the
+        lock) are never blocked, including reads made by *this* instance.
+        Reentrant — nesting is a no-op, same as ``_guarded_write``.
+
+        Args:
+            write: If False, still acquires the lock (blocking concurrent
+                writers for the whole block, so reads made inside see a
+                consistent snapshot) but skips the resave on exit, since
+                nothing was mutated — used when this instance is only
+                being read from within the block (e.g. as the *source* of
+                :func:`cvcdocdb.migration.migrate`), to avoid rewriting
+                the whole persisted graph to disk for nothing.
+        """
+        with self._guarded_write(save=write):
+            yield
+
+    @contextmanager
+    def _guarded_write(self, save: bool = True) -> Iterator[None]:
         """Serialize a load-mutate-save cycle across processes/instances.
 
         Every public mutating method wraps its body in this context
@@ -1468,12 +1530,20 @@ class NetworkXGraph(GraphStore):
         partial write.
         """
         is_outermost = not self._file_lock.is_locked
-        self._file_lock.acquire()
+        timeout = _WAIT_FOREVER if self._lock_timeout is None else self._lock_timeout
+        try:
+            self._file_lock.acquire(timeout=timeout)
+        except FileLockTimeout as exc:
+            raise GraphLockTimeout(
+                f"Could not acquire the write lock on {self._persistence_path!r} "
+                f"within {self._lock_timeout}s: another process or instance is holding it "
+                f"(a long or stuck write/migration)"
+            ) from exc
         try:
             if is_outermost:
                 self._load_state()
             yield
-            if is_outermost:
+            if is_outermost and save:
                 self._save_state()
         finally:
             self._file_lock.release()
@@ -1565,7 +1635,10 @@ class NetworkXGraph(GraphStore):
         self._vector_indexes = {}
         if self._vector_index_meta:
             if hnswlib is None:
-                raise RuntimeError("hnswlib is required to load persisted vector indexes")
+                raise RuntimeError(
+                    "hnswlib is required to load persisted vector indexes. "
+                    'Install it with: pip install "cvcdocdb[vector]"'
+                )
             for prop_name, meta in self._vector_index_meta.items():
                 idx = hnswlib.Index(space=meta["space"], dim=meta["dimensions"])
                 vector_path = self._vector_index_file(prop_name)
@@ -1696,7 +1769,10 @@ class NetworkXGraph(GraphStore):
     ) -> None:
         """Create and register an empty hnswlib index for one property."""
         if hnswlib is None:
-            raise RuntimeError("hnswlib is required for vector indexing")
+            raise RuntimeError(
+                "hnswlib is required for vector indexing. "
+                'Install it with: pip install "cvcdocdb[vector]"'
+            )
 
         idx = hnswlib.Index(space=space, dim=dimensions)
         idx.init_index(
@@ -1976,7 +2052,16 @@ from typing import List as _List, Dict as _Dict, Any as _Any, Tuple as _Tuple
 def _execute_cypher(
     graph: "NetworkXGraph", cypher: str, params: _Dict[str, _Any]
 ) -> _List[_Dict[str, _Any]]:
-    """Execute a simplified Cypher query on a NetworkXGraph."""
+    """Execute a simplified Cypher query on a NetworkXGraph.
+
+    Read-only queries go to the parser-based engine in
+    :mod:`cvcdocdb.nx_cypher`; write queries (CREATE, MERGE, SET, DELETE...)
+    keep using the clause-by-clause engine below.
+    """
+    from cvcdocdb.nx_cypher import execute_read, is_write_query
+
+    if not is_write_query(cypher):
+        return execute_read(graph, cypher, params)
     # Normalize whitespace
     cypher = " ".join(cypher.split()).strip()
     # Substitute parameters
