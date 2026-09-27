@@ -29,11 +29,20 @@ Install from PyPI::
 
     pip install cvcdocdb
 
-Or install from source in development mode::
+Optional features are installed as extras, e.g. ``pip install "cvcdocdb[rdf,vector]"``:
+
+* ``rdf`` -- RDF/OWL ontology import (``cvcdocdb.rdf_schema``)
+* ``schema`` -- entity-class generation from a YAML schema (``cvcdocdb.schema_gen``)
+* ``vector`` -- vector indexes on ``NetworkXGraph``
+* ``torch`` -- PyTorch / PyG data loaders (``cvcdocdb.torch_dataloader``)
+* ``graphrag`` -- ``Text2Cypher`` on a ``Neo4jGraph`` (Python >= 3.10)
+
+Or install from source in development mode (``requirements.txt`` adds the
+documentation/notebook tools and some optional dependencies used for development)::
 
     git clone https://github.com/CVC-DAG/cvcdocdb.git
     cd cvcdocdb
-    pip install -e .
+    pip install -e . -r requirements.txt
 
 Register the recommended Jupyter kernel for tutorials::
 

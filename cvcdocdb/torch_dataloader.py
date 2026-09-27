@@ -41,7 +41,7 @@ try:
     from torch.utils.data import DataLoader, IterableDataset
 except ImportError as _e:  # pragma: no cover
     raise ImportError(
-        "PyTorch is required.  Install with:  pip install torch"
+        'PyTorch is required. Install it with: pip install "cvcdocdb[torch]"'
     ) from _e
 
 from .graph_store import GraphStore
@@ -520,7 +520,7 @@ def to_pyg_data(
         from torch_geometric.data import Data
     except ImportError as exc:
         raise ImportError(
-            "torch_geometric és necessari.  Instal·la amb:  pip install torch_geometric"
+            'torch_geometric is required. Install it with: pip install "cvcdocdb[torch]"'
         ) from exc
 
     backend = type(store).__name__
@@ -655,7 +655,7 @@ class SubgraphDataset(IterableDataset):
             from torch_geometric.data import Data
         except ImportError as exc:
             raise ImportError(
-                "torch_geometric és necessari.  Instal·la amb:  pip install torch_geometric"
+                'torch_geometric is required. Install it with: pip install "cvcdocdb[torch]"'
             ) from exc
 
         backend = type(self._store).__name__
@@ -789,7 +789,7 @@ def PyGDataLoader(
         from torch_geometric.loader import DataLoader as _PYGLoader
     except ImportError as exc:
         raise ImportError(
-            "torch_geometric és necessari.  Instal·la amb:  pip install torch_geometric"
+            'torch_geometric is required. Install it with: pip install "cvcdocdb[torch]"'
         ) from exc
     return _PYGLoader(dataset, batch_size=batch_size, **kwargs)
 
