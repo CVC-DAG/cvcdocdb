@@ -9,6 +9,7 @@ wheel declared no dependencies at all.
 
 import email
 import os
+import shutil
 import subprocess
 import sys
 import zipfile
@@ -40,9 +41,16 @@ def _name(requirement: str) -> str:
 
 @pytest.fixture(scope="module")
 def wheel_metadata(tmp_path_factory):
+    # Build from a copy: building in place rewrites the source tree's
+    # *.egg-info, which an editable install reads its metadata from.
+    src = tmp_path_factory.mktemp("src") / "cvcdocdb"
+    shutil.copytree(
+        ROOT, src,
+        ignore=shutil.ignore_patterns(".git", ".venv", "dist", "build", "*.egg-info", "_build", "__pycache__"),
+    )
     out = tmp_path_factory.mktemp("dist")
     subprocess.run(
-        [sys.executable, "-m", "build", "--no-isolation", "--outdir", str(out), ROOT],
+        [sys.executable, "-m", "build", "--no-isolation", "--outdir", str(out), str(src)],
         check=True,
         capture_output=True,
     )
@@ -76,3 +84,13 @@ def test_wheel_declares_optional_extras(wheel_metadata):
 def test_wheel_has_no_development_only_dependencies(wheel_metadata):
     declared = {_name(r) for r in wheel_metadata.get_all("Requires-Dist", [])}
     assert not declared & DEV_ONLY
+
+
+@pytest.mark.unit
+def test_version_matches_installed_metadata():
+    import importlib.metadata
+
+    import cvcdocdb
+
+    assert cvcdocdb.__version__ == importlib.metadata.version("cvcdocdb")
+
