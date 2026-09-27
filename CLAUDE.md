@@ -12,7 +12,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ### Version numbers only change at publish time
 
-On **any** branch, a real version number (in `setup.py`'s `VERSION` and a dated `CHANGELOG.md` section) is only ever set at the exact moment of actually publishing to PyPI — never merely when merging `develop` into `main`. Merging into `main` in preparation for a release keeps the CHANGELOG entries under `[Unreleased]` and `VERSION` unchanged until the `twine upload` step itself.
+On **any** branch, a real version number (in `setup.py`'s `VERSION` and a dated `CHANGELOG.md` section) is only ever set at the exact moment of actually publishing to PyPI — never merely when merging `develop` into `main`. Merging into `main` in preparation for a release keeps the CHANGELOG entries under `[Unreleased]` and `VERSION` unchanged until the release commit made right before publishing.
 
 ### Major vs. minor/patch changes
 
@@ -125,6 +125,7 @@ This library implements a graph-based document representation model. It supports
 - Do not suggest publishing as part of a "next step" or "todo"
 - Publishing is a manual, user-initiated action — the user will say "publica al PyPI" or similar
 - Always confirm the version number before publishing
+- Publish by creating the GitHub release (`gh release create vX.Y.Z`): the `python-publish.yml` workflow runs the release tests and uploads to PyPI. Never also run `twine upload` — a second upload fails with `400 File already exists`
 
 ## Key Concepts
 - **Semantic Entities**: Domain-specific node types (e.g., `IndividuPadro`, `LlocPadro`) defined within the graph.
