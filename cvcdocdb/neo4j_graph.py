@@ -56,11 +56,11 @@ def _deprecation_filter_session_kwargs(
 ) -> Dict[str, Any]:
     """Session options that silence the server's DEPRECATION notifications.
 
-    cvcdocdb uses ``id()`` throughout (its public node ids are integers;
-    ``elementId()`` returns strings, a breaking change kept for the next
-    major version), and Neo4j 5 flags every such query as deprecated: a
-    migration logged hundreds of warnings, hiding the real ones. Only the
-    DEPRECATION category is filtered — any other notification (e.g. an
+    Introduced when cvcdocdb 1.x used the deprecated ``id()`` everywhere (a
+    migration logged hundreds of warnings, hiding the real ones). Since 2.0
+    node/relation ids are ``elementId()`` strings and cvcdocdb's own queries
+    no longer trigger it, but the filter stays for any other deprecated
+    feature a query may use. Only the DEPRECATION category is filtered — any other notification (e.g. an
     unknown property) still reaches the log.
 
     Returns no options when the server predates notification filters
@@ -110,6 +110,12 @@ def _pk_constraint_statement(main_label: str, props: Tuple[str, ...], node_key: 
     columns = ", ".join(f"n.`{prop}`" for prop in props)
     kind = "IS NODE KEY" if node_key else "IS UNIQUE"
     return name, f"CREATE CONSTRAINT `{name}` IF NOT EXISTS FOR (n:`{main_label}`) REQUIRE ({columns}) {kind}"
+
+
+def _is_backend_id(value: Any) -> bool:
+    """Si *value* és un identificador de node/relació de Neo4j (``elementId``,
+    una cadena no buida) — i no ``None``/``False``, que vol dir "no trobat"."""
+    return isinstance(value, str) and value != ""
 
 
 def _validate_cypher_identifier(name: Any, kind: str) -> str:
@@ -340,7 +346,7 @@ class Neo4jGraph:
         self._tx = None
         self._closed = False
         # Internal tracking: neo4j_id -> pk dict (for get_node_pks)
-        self._node_pks: Dict[int, Dict[str, Any]] = {}
+        self._node_pks: Dict[str, Dict[str, Any]] = {}
         # Server version first: the session's notification filter depends on it.
         server_protocol = self._driver.get_server_info().protocol_version
         self._version = server_protocol[0]
@@ -350,7 +356,7 @@ class Neo4jGraph:
         self._session = self._driver.session(**session_kwargs)
         # FK index: neo4j_id → set of (other_id, rel_type, direction)
         # direction: "out" = edge starts here, "in" = edge ends here
-        self._fk_index: Dict[int, Set[Tuple[int, str, str]]] = {}
+        self._fk_index: Dict[str, Set[Tuple[str, str, str]]] = {}
         # Propagation initialization tracking
         self._propagation_initialized: bool = False
         self._propagation_lock: threading.Lock = threading.Lock()
@@ -533,7 +539,7 @@ class Neo4jGraph:
                 for child in nodeList:
                     self.deleteNode(
                         Node(
-                            neo4j_id=child[0]._id,
+                            neo4j_id=child[0].element_id,  # elementId (2.0), no l'id enter antic
                             alternative_labels=list(child[0]._labels),
                             **child[0]._properties,
                         ),
@@ -543,8 +549,8 @@ class Neo4jGraph:
                 # After deleting children, remove any remaining outgoing edges
                 if node.neo4j_id is not None:
                     self._tx.run(
-                        "MATCH (a)-[r]->(b) WHERE id(a)="
-                        + str(node.neo4j_id) + " DELETE r"
+                        "MATCH (a)-[r]->(b) WHERE elementId(a) = $nid DELETE r",
+                        nid=node.neo4j_id,
                     )
 
             if on_delete == "set_null":
@@ -554,9 +560,8 @@ class Neo4jGraph:
                     # Remove all edges before the node (Neo4j won't allow deleting
                     # a node that still has relationships with a plain DELETE)
                     self._tx.run(
-                        "MATCH (a) WHERE id(a) = "
-                        + str(node.neo4j_id)
-                        + " DETACH DELETE a"
+                        "MATCH (a) WHERE elementId(a) = $nid DETACH DELETE a",
+                        nid=node.neo4j_id,
                     )
                     res = True
                 else:
@@ -738,7 +743,7 @@ class Neo4jGraph:
             else:
                 # id = self._session.read_transaction(self._check_relation, rel['src'],rel['dst'],rel['type'])
                 id = self._check_relation(self._tx, rel["src"], rel["dst"], rel["type"])
-                if isinstance(id, int) and not isinstance(id, bool):
+                if _is_backend_id(id):
                     if replace:
                         # Remove old FK index entries before deleting
                         self._remove_from_fk_index_for_relation(self._tx, rel)
@@ -803,15 +808,15 @@ class Neo4jGraph:
     # Public API: query operations
     # ------------------------------------------------------------------
 
-    def get_node_ids(self) -> List[int]:
+    def get_node_ids(self) -> List[str]:
         """Return all internal node ids in the graph."""
         if self._closed:
             return []
         runner = self._tx if self._tx is not None else self._session
-        result = runner.run("MATCH (n) RETURN id(n) AS nid")
+        result = runner.run("MATCH (n) RETURN elementId(n) AS nid")
         return [record["nid"] for record in result]
 
-    def get_nodes(self) -> List[int]:
+    def get_nodes(self) -> List[str]:
         """Alias for :meth:`get_node_ids` for backward compatibility."""
         return self.get_node_ids()
 
@@ -820,7 +825,7 @@ class Neo4jGraph:
         result = []
         for nid, pk in self._node_pks.items():
             r = self._session.run(
-                "MATCH (n) WHERE id(n) = $nid RETURN labels(n)[0] AS label",
+                "MATCH (n) WHERE elementId(n) = $nid RETURN labels(n)[0] AS label",
                 nid=nid
             ).single()
             label = r["label"] if r else ""
@@ -840,7 +845,7 @@ class Neo4jGraph:
         expected to handle it.
         """
         record = self._session.run(
-            "MATCH (n) WHERE id(n) = $nid "
+            "MATCH (n) WHERE elementId(n) = $nid "
             "RETURN labels(n) AS labels, properties(n) AS props",
             nid=node_id,
         ).single()
@@ -1162,7 +1167,7 @@ class Neo4jGraph:
     def get_edges(self) -> List[Tuple[int, int, str]]:
         """Return all edges as ``(src_id, dst_id, rel_type)`` tuples."""
         result = self._session.run(
-            "MATCH (a)-[r]->(b) RETURN id(a) AS src, id(b) AS dst, type(r) AS rel_type"
+            "MATCH (a)-[r]->(b) RETURN elementId(a) AS src, elementId(b) AS dst, type(r) AS rel_type"
         )
         return [
             (record["src"], record["dst"], record["rel_type"])
@@ -1174,7 +1179,7 @@ class Neo4jGraph:
         _validate_cypher_identifier(key, "relation type")
         result = self._session.run(
             "MATCH (a)-[r:" + key + "]->(b) "
-            "WHERE id(a) = $src AND id(b) = $dst "
+            "WHERE elementId(a) = $src AND elementId(b) = $dst "
             "RETURN r",
             src=u, dst=v
         )
@@ -1192,7 +1197,7 @@ class Neo4jGraph:
         _validate_cypher_identifier(relation_type, "relation type")
         result = self._session.run(
             "MATCH (a)-[:" + relation_type + "]->(b) "
-            "WHERE id(a) = $nid "
+            "WHERE elementId(a) = $nid "
             "RETURN b.name AS name LIMIT 1",
             nid=node_id,
         )
@@ -1295,7 +1300,7 @@ class Neo4jGraph:
         to Cypher via :func:`_dict_filter_to_cypher` and returns results
         shaped like ``NetworkXGraph.query()``'s dict-mode output."""
         where_clause, bound_params = _dict_filter_to_cypher(filter_dict, var="n")
-        cypher = f"MATCH (n) WHERE {where_clause} RETURN n AS n, id(n) AS __node_id"
+        cypher = f"MATCH (n) WHERE {where_clause} RETURN n AS n, elementId(n) AS __node_id"
 
         if sort is not None:
             field, direction = sort
@@ -1373,7 +1378,7 @@ class Neo4jGraph:
             labels = "" if strong_node.labels == "" else ":" + ":".join(strong_node.labels)
 
             result = tx.run(
-                "CREATE (a" + labels + ") SET a = $prop_dict RETURN id(a) AS id",
+                "CREATE (a" + labels + ") SET a = $prop_dict RETURN elementId(a) AS id",
                 prop_dict=props,
             ).value("id")[0]
             strong_node["neo4j_id"] = result
@@ -1386,7 +1391,7 @@ class Neo4jGraph:
                     wn_labels = "" if wn.labels == "" else ":" + ":".join(wn.labels)
 
                     wn_result = tx.run(
-                        "CREATE (a" + wn_labels + ") SET a = $prop_dict RETURN id(a) AS id",
+                        "CREATE (a" + wn_labels + ") SET a = $prop_dict RETURN elementId(a) AS id",
                         prop_dict=wn_props,
                     ).value("id")[0]
                     wn["neo4j_id"] = wn_result
@@ -1394,8 +1399,8 @@ class Neo4jGraph:
                     # Create the WeakRelation edge from strong_node to weak node
                     rel_type = wn.get("parent_relation", "HAS_CHILD")
                     tx.run(
-                        "MATCH (a) WHERE id(a) = $parent_id "
-                        "MATCH (b) WHERE id(b) = $child_id "
+                        "MATCH (a) WHERE elementId(a) = $parent_id "
+                        "MATCH (b) WHERE elementId(b) = $child_id "
                         "CREATE (a)-[r:" + rel_type + "]->(b) "
                         "SET r._propagate = TRUE, r.parent_relation = $rel_type",
                         parent_id=strong_node["neo4j_id"],
@@ -1417,8 +1422,8 @@ class Neo4jGraph:
                     # Resolve by neo4j_id if available, otherwise by PK
                     if src_id is not None and dst_id is not None:
                         tx.run(
-                            "MATCH (a) WHERE id(a) = $src "
-                            "MATCH (b) WHERE id(b) = $dst "
+                            "MATCH (a) WHERE elementId(a) = $src "
+                            "MATCH (b) WHERE elementId(b) = $dst "
                             "CREATE (a)-[r:" + wr_type + "]->(b)",
                             src=src_id,
                             dst=dst_id,
@@ -1444,7 +1449,7 @@ class Neo4jGraph:
 
             # 4. Mark the strong node as having its weak children initialized.
             tx.run(
-                "MATCH (a) WHERE id(a) = $nid SET a._weak_init_done = TRUE",
+                "MATCH (a) WHERE elementId(a) = $nid SET a._weak_init_done = TRUE",
                 nid=result,
             )
 
@@ -1484,7 +1489,7 @@ class Neo4jGraph:
             # it automatically because the edges already carry _propagate=True.
             result = session.run(
                 "MATCH (n) WHERE n._weak_init_done IS NULL OR n._weak_init_done = FALSE "
-                "RETURN id(n) AS nid"
+                "RETURN elementId(n) AS nid"
             )
             pending_strong_ids = {record["nid"] for record in result}
 
@@ -1494,8 +1499,8 @@ class Neo4jGraph:
                 placeholders = ", ".join(f"$p{i}" for i in range(len(pending_strong_ids)))
                 query = (
                     "MATCH (a)-[r]->(b) WHERE r._propagate = TRUE "
-                    f"AND id(a) IN [{placeholders}] "
-                    "RETURN DISTINCT id(b) AS child_id, id(a) AS parent_id"
+                    f"AND elementId(a) IN [{placeholders}] "
+                    "RETURN DISTINCT elementId(b) AS child_id, elementId(a) AS parent_id"
                 )
                 child_result = session.run(
                     query,
@@ -1505,7 +1510,7 @@ class Neo4jGraph:
 
                 for nid in child_ids:
                     session.run(
-                        "MATCH (n) WHERE id(n) = $nid SET n.is_weak = TRUE, n._propagate = TRUE",
+                        "MATCH (n) WHERE elementId(n) = $nid SET n.is_weak = TRUE, n._propagate = TRUE",
                         nid=nid,
                     )
 
@@ -1515,7 +1520,7 @@ class Neo4jGraph:
                     child_id = record["child_id"]
                     session.run(
                         "MATCH (a)-[r]->(b) "
-                        "WHERE id(a) = $parent AND id(b) = $child "
+                        "WHERE elementId(a) = $parent AND elementId(b) = $child "
                         "AND r._propagate = TRUE "
                         "SET r.parent_relation = type(r)",
                         parent=parent_id,
@@ -1525,7 +1530,7 @@ class Neo4jGraph:
                 # Mark the parent as initialized
                 for nid in pending_strong_ids:
                     session.run(
-                        "MATCH (n) WHERE id(n) = $nid SET n._weak_init_done = TRUE",
+                        "MATCH (n) WHERE elementId(n) = $nid SET n._weak_init_done = TRUE",
                         nid=nid,
                     )
             else:
@@ -1896,7 +1901,7 @@ class Neo4jGraph:
                 _trasa += "(1) Actualitza el node "
             else:
                 id = self.checkNode(node) if not is_backend_assigned_pk else None
-                if isinstance(id, int) and not isinstance(id, bool):
+                if _is_backend_id(id):
                     if replace:
                         # ON UPDATE CASCADE: in Neo4j, edges reference nodes
                         # by internal ID which never changes.  replace=True
@@ -1984,7 +1989,7 @@ class Neo4jGraph:
             + label
             + ") WHERE "
             + _generate_where_cond("n", pk)
-            + " RETURN id(n) AS nid"
+            + " RETURN elementId(n) AS nid"
         ).single()
         return result["nid"] if result else None
 
@@ -2026,16 +2031,14 @@ class Neo4jGraph:
             if direction == "out":
                 edge_query = (
                     "MATCH (a)-[r:" + rel_type + "]->(b) "
-                    "WHERE id(a) = " + str(node_id) + " AND id(b) = " + str(neighbor_id)
-                    + " DELETE r"
+                    "WHERE elementId(a) = $node_id AND elementId(b) = $neighbor_id DELETE r"
                 )
             else:
                 edge_query = (
                     "MATCH (a)-[r:" + rel_type + "]->(b) "
-                    "WHERE id(b) = " + str(node_id) + " AND id(a) = " + str(neighbor_id)
-                    + " DELETE r"
+                    "WHERE elementId(b) = $node_id AND elementId(a) = $neighbor_id DELETE r"
                 )
-            tx.run(edge_query)
+            tx.run(edge_query, node_id=node_id, neighbor_id=neighbor_id)
 
             # Clean FK index for neighbor
             if neighbor_id in self._fk_index:
@@ -2094,7 +2097,7 @@ class Neo4jGraph:
 
         try:
             result = tx.run(
-                "CREATE (a" + labels + ") SET a = $prop_dict RETURN id(a) AS id",
+                "CREATE (a" + labels + ") SET a = $prop_dict RETURN elementId(a) AS id",
                 prop_dict=props,
             ).value("id")[0]
             return result
@@ -2135,7 +2138,7 @@ class Neo4jGraph:
             + " ON MATCH SET a"
             + labels
             + ", a += $prop_dict"
-            + " RETURN id(a) AS id"
+            + " RETURN elementId(a) AS id"
         )
         # print("(_update_node) query:", query, "a:", a)
         try:
@@ -2165,11 +2168,9 @@ class Neo4jGraph:
                 + "DELETE a"
             )
         else:
-            query = (
-                "MATCH (a) WHERE id(a) = " + str(neo4j_id) + " " + detach_text + "DELETE a"
-            )
+            query = "MATCH (a) WHERE elementId(a) = $nid " + detach_text + "DELETE a"
 
-        result = tx.run(query).values()
+        result = tx.run(query, nid=neo4j_id).values()
         return result == []
 
     @staticmethod
@@ -2185,7 +2186,7 @@ class Neo4jGraph:
                 + main_label
                 + ") WHERE "
                 + _generate_where_cond("a", id)
-                + " RETURN id(a)"
+                + " RETURN elementId(a)"
             ).single()
         except:
             return None
@@ -2203,7 +2204,7 @@ class Neo4jGraph:
             idnode = tx.run(
                 "MATCH (a:"
                 + main_label
-                + ") WHERE id(a) = $nid RETURN id(a)",
+                + ") WHERE elementId(a) = $nid RETURN elementId(a)",
                 nid=node_id,
             ).single()
         except Exception:
@@ -2242,14 +2243,14 @@ class Neo4jGraph:
 
         if attributes is not None:
             result = tx.run(
-                query + " SET r = $prop_dict RETURN id(r) AS id",
+                query + " SET r = $prop_dict RETURN elementId(r) AS id",
                 prop_dict=attributes,
             ).value("id")[0]
         else:
             try:
-                result = tx.run(query + " RETURN id(r) AS id").value("id")[0]
+                result = tx.run(query + " RETURN elementId(r) AS id").value("id")[0]
             except Exception as err:
-                a = tx.run("PROFILE " + query + " return id(r) as id")
+                a = tx.run("PROFILE " + query + " return elementId(r) as id")
                 print(a.consume().profile["args"]["string-representation"])
                 print(type(a))
                 print(err)
@@ -2285,7 +2286,7 @@ class Neo4jGraph:
                     query
                     + " ON CREATE SET r += $prop_dict"
                     + " ON MATCH SET r += $prop_dict"
-                    + " RETURN id(r) AS id",
+                    + " RETURN elementId(r) AS id",
                     prop_dict=attributes,
                 ).value("id")[0]
             except Exception as err:
@@ -2298,7 +2299,7 @@ class Neo4jGraph:
                 raise
         else:
             try:
-                result = tx.run(query + " RETURN id(r) AS id").value("id")[0]
+                result = tx.run(query + " RETURN elementId(r) AS id").value("id")[0]
             except Exception as err:
                 print(err)
                 print(query)
@@ -2366,7 +2367,7 @@ class Neo4jGraph:
             + dst["main_label"]
             + ") WHERE  "
             + _generate_where_cond("b", dst["pk"])
-            + "RETURN id(r) AS id"
+            + "RETURN elementId(r) AS id"
         )
 
         idnode = tx.run(query).single()
@@ -2406,7 +2407,7 @@ class Neo4jGraph:
             + dst["main_label"]
             + ") WHERE  "
             + _generate_where_cond("b", dst["pk"])
-            + "RETURN id(r) AS id"
+            + "RETURN elementId(r) AS id"
         )
 
         idnode = tx.run(query).single()
@@ -2467,9 +2468,8 @@ class Neo4jGraph:
         neo4j_id = node.neo4j_id
         if neo4j_id is not None:
             query = (
-                "MATCH (n) WHERE id(n) = "
-                + str(neo4j_id)
-                + " OPTIONAL MATCH (n)-[x]-() RETURN count(x) = 0 AS has_no_edges"
+                "MATCH (n) WHERE elementId(n) = $nid "
+                "OPTIONAL MATCH (n)-[x]-() RETURN count(x) = 0 AS has_no_edges"
             )
         else:
             main_label = "" if node.main_label == "" else ":" + node.main_label
@@ -2480,7 +2480,7 @@ class Neo4jGraph:
                 + _generate_where_cond("a", node["pk"])
                 + " OPTIONAL MATCH (a)-[x]-() RETURN count(x) = 0 AS has_no_edges"
             )
-        return tx.run(query).single()["has_no_edges"]
+        return tx.run(query, nid=neo4j_id).single()["has_no_edges"]
 
     @staticmethod
     def _get_propagated_nodes(tx: Any, node: Node) -> List[Any]:
@@ -2499,11 +2499,8 @@ class Neo4jGraph:
                 + " RETURN b"
             )
         else:
-            query = (
-                "MATCH (n)-[r]->(b) WHERE id(n)="
-                + str(neo4j_id)
-                + " AND r._propagate=TRUE RETURN b"
-            )
+            query = "MATCH (n)-[r]->(b) WHERE elementId(n) = $nid AND r._propagate=TRUE RETURN b"
+            return tx.run(query, nid=neo4j_id).values()
         return tx.run(query).values()
 
 
@@ -2637,7 +2634,7 @@ def _generate_where_cond(node_name, pk, type="where"):
     valor = [pk[a] for a in pk.keys() if a == 'neo4j_id']
     valor = valor[0] if len(valor) > 0 else None
 
-    id_key = 'id(' + node_name + ')'
+    id_key = 'elementId(' + node_name + ')'
     if valor is not None and len(pk) == 1:
         pk = { id_key : valor}
 

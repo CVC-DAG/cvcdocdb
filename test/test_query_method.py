@@ -305,7 +305,7 @@ class Neo4jQueryTest(unittest.TestCase):
             self.assertEqual(result[0]["main_label"], "QueryDictFilterTest")
             self.assertEqual(result[0]["properties"]["name"], "Alice")
             self.assertEqual(result[0]["properties"]["age"], 30)
-            self.assertIsInstance(result[0]["node_id"], int)
+            self.assertIsInstance(result[0]["node_id"], str)  # elementId des de la 2.0
         finally:
             self.graph.query(
                 "MATCH (n:QueryDictFilterTest) DETACH DELETE n"

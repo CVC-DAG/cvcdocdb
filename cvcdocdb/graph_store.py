@@ -314,7 +314,7 @@ class GraphStore(ABC):
     def get_node_ids(self) -> List[int]:
         """Return all internal node ids in the graph.
 
-        Returns the backend-specific internal ids (Neo4j ``id(n)``,
+        Returns the backend-specific internal ids (Neo4j ``elementId(n)`` strings since 2.0,
         NetworkX node keys).  These are opaque identifiers and must
         not be compared with primary keys.
 

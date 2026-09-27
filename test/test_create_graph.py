@@ -22,6 +22,12 @@ from cvcdocdb.base import Node, Relation, WeakNode
 from cvcdocdb.neo4j_graph import Neo4jGraph
 
 
+
+def _is_neo4j_id(value) -> bool:
+    """Des de cvcdocdb 2.0, els identificadors de Neo4j són ``elementId()``
+    (cadenes, p. ex. ``'4:<uuid>:12'``), no enters ``id()``."""
+    return isinstance(value, str) and value != ""
+
 def _get_config() -> Dict[str, Optional[str]]:
     """Load Neo4j connection config from .env environment variables."""
     target = os.environ.get("NEO4J_TARGET", "DEV")
@@ -229,9 +235,9 @@ class CVCDocDBTest(unittest.TestCase):
         ins_d = Connection.insertNode(d, replace=True)
 
         Connection.close()
-        self.assertTrue(isinstance(ins_a, int))
-        self.assertTrue(isinstance(ins_c_2, int))
-        self.assertTrue(isinstance(ins_d, int))
+        self.assertTrue(_is_neo4j_id(ins_a), ins_a)
+        self.assertTrue(_is_neo4j_id(ins_c_2), ins_c_2)
+        self.assertTrue(_is_neo4j_id(ins_d), ins_d)
 
     def test_delete_node(self):
         """Test per validar el esborrat de nodes amb propagation."""
@@ -313,8 +319,8 @@ class CVCDocDBTest(unittest.TestCase):
         Connection.close()
         # update=True: retorna >= 0 si el node s'ha actualitzat
         # replace=True: retorna >= 0 si el node s'ha esborrat i recreat
-        self.assertGreaterEqual(up_a_1, 0)
-        self.assertGreaterEqual(up_a_2, 0)
+        self.assertTrue(_is_neo4j_id(up_a_1), up_a_1)
+        self.assertTrue(_is_neo4j_id(up_a_2), up_a_2)
 
     def test_update_node_pk_compost(self):
         """Test per validar la creacio de nodes amb PK composta."""
@@ -341,8 +347,8 @@ class CVCDocDBTest(unittest.TestCase):
         up_b_1 = Connection.insertNode(b, replace=False, update=True)
 
         Connection.close()
-        self.assertGreaterEqual(up_a_1, 0)
-        self.assertGreaterEqual(up_b_1, 0)
+        self.assertTrue(_is_neo4j_id(up_a_1), up_a_1)
+        self.assertTrue(_is_neo4j_id(up_b_1), up_b_1)
 
 
 if __name__ == '__main__':

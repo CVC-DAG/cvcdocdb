@@ -55,6 +55,12 @@ from cvcdocdb.drm_entities import *
 from cvcdocdb.base import *
 
 
+
+def _is_neo4j_id(value) -> bool:
+    """Des de cvcdocdb 2.0, els identificadors de Neo4j són ``elementId()``
+    (cadenes, p. ex. ``'4:<uuid>:12'``), no enters ``id()``."""
+    return isinstance(value, str) and value != ""
+
 def _load_config() -> Optional[Dict[str, Optional[str]]]:
     """Load Neo4j connection config from .env environment variables.
 
@@ -149,13 +155,11 @@ class Neo4jRealTest(unittest.TestCase):
 
         # Primera inserció amb replace=True (crea el node)
         up_a_1 = self.graph.insertNode(a, replace=True)
-        self.assertIsInstance(up_a_1, int, "insertNode hauria de retornar int")
-        self.assertGreaterEqual(up_a_1, 0, "Neo4j id ha de ser >= 0")
+        self.assertTrue(_is_neo4j_id(up_a_1), "insertNode hauria de retornar un elementId (str) des de la 2.0")
 
         # Segona inserció amb update=True (actualitza els atributs)
         up_b_1 = self.graph.insertNode(b, replace=False, update=True)
-        self.assertIsInstance(up_b_1, int, "insertNode hauria de retornar int")
-        self.assertGreaterEqual(up_b_1, 0, "Neo4j id ha de ser >= 0")
+        self.assertTrue(_is_neo4j_id(up_b_1), "insertNode hauria de retornar un elementId (str) des de la 2.0")
 
         # Els IDs han de ser iguals perquè es refereixen al mateix node
         self.assertEqual(up_a_1, up_b_1,
@@ -190,11 +194,11 @@ class Neo4jRealTest(unittest.TestCase):
 
         # Primera inserció amb replace=True (crea el node)
         up_a_1 = self.graph.insertNode(a, replace=True)
-        self.assertGreaterEqual(up_a_1, 0)
+        self.assertTrue(_is_neo4j_id(up_a_1), up_a_1)
 
         # Segona inserció amb update=True (actualitza sense substituir)
         up_b_1 = self.graph.insertNode(b, replace=False, update=True)
-        self.assertGreaterEqual(up_b_1, 0)
+        self.assertTrue(_is_neo4j_id(up_b_1), up_b_1)
 
         # Els IDs han de ser iguals
         self.assertEqual(up_a_1, up_b_1)
@@ -226,15 +230,15 @@ class Neo4jRealTest(unittest.TestCase):
 
         # Insert amb replace=True
         up_a = self.graph.insertNode(a, replace=True)
-        self.assertGreaterEqual(up_a, 0)
+        self.assertTrue(_is_neo4j_id(up_a), up_a)
 
         # Insert amb update=True (MERGE)
         up_b = self.graph.insertNode(b, replace=False, update=True)
-        self.assertGreaterEqual(up_b, 0)
+        self.assertTrue(_is_neo4j_id(up_b), up_b)
 
         # Insert simple (CREATE)
         up_c = self.graph.insertNode(c, replace=False, update=False)
-        self.assertGreaterEqual(up_c, 0)
+        self.assertTrue(_is_neo4j_id(up_c), up_c)
 
         # Verifica que els tres inserts van retornar ids vàlids
         self.assertNotEqual(up_a, up_b, "Dos IndividuPadro diferents han de tenir ids diferents")
@@ -259,7 +263,7 @@ class Neo4jRealTest(unittest.TestCase):
 
         # Insert original
         id1 = self.graph.insertNode(node1, replace=True)
-        self.assertGreaterEqual(id1, 0)
+        self.assertTrue(_is_neo4j_id(id1), id1)
 
         # Node substitut amb mateixa pk però atributs diferents
         node2 = Node(
@@ -271,7 +275,7 @@ class Neo4jRealTest(unittest.TestCase):
 
         # Replace amb node2
         id2 = self.graph.insertNode(node2, replace=True)
-        self.assertGreaterEqual(id2, 0)
+        self.assertTrue(_is_neo4j_id(id2), id2)
 
     def test_node_attributes_preserved(self) -> None:
         """Validar que els atributs dels nodes es preserven correctament.
@@ -291,7 +295,7 @@ class Neo4jRealTest(unittest.TestCase):
         )
 
         node_id = self.graph.insertNode(node, replace=True)
-        self.assertGreaterEqual(node_id, 0)
+        self.assertTrue(_is_neo4j_id(node_id), node_id)
 
         # El node ha de ser localizable per la seva pk
         check_node = Node(pk={"id": 100}, main_label="TestNode")
@@ -312,14 +316,14 @@ class Neo4jRealTest(unittest.TestCase):
         src_id = self.graph.insertNode(src, replace=True)
         dst_id = self.graph.insertNode(dst, replace=True)
 
-        self.assertGreaterEqual(src_id, 0)
-        self.assertGreaterEqual(dst_id, 0)
+        self.assertTrue(_is_neo4j_id(src_id), src_id)
+        self.assertTrue(_is_neo4j_id(dst_id), dst_id)
 
         # Crea la relació
         relation = Relation(src, dst, "CONNECTS_TO", weight=5.0)
         rel_id = self.graph.insertRelation(relation, update=True)
 
-        self.assertGreaterEqual(rel_id, 0)
+        self.assertTrue(_is_neo4j_id(rel_id), rel_id)
 
     def test_weak_node_insertion(self) -> None:
         """Validar creació de WeakNodes amb parent.
@@ -345,12 +349,12 @@ class Neo4jRealTest(unittest.TestCase):
 
         # Inserta el pare
         parent_id = self.graph.insertNode(parent, replace=True)
-        self.assertGreaterEqual(parent_id, 0)
+        self.assertTrue(_is_neo4j_id(parent_id), parent_id)
 
         # Inserta el fill (WeakNode)
         # insert_parent=False perquè ja l'hem inserit
         child_id = self.graph.insertNode(child, insert_parent=False)
-        self.assertGreaterEqual(child_id, 0)
+        self.assertTrue(_is_neo4j_id(child_id), child_id)
 
         # Els IDs han de ser diferents
         self.assertNotEqual(parent_id, child_id)
@@ -421,7 +425,7 @@ class Neo4jRealTest(unittest.TestCase):
 
         # Inserta el node
         loc_id = self.graph.insertNode(location, replace=True)
-        self.assertGreaterEqual(loc_id, 0)
+        self.assertTrue(_is_neo4j_id(loc_id), loc_id)
 
         # Verifica que la pk composada es va guardar correctament
         self.assertEqual(location.main_label, "LlocPadro")
@@ -444,7 +448,7 @@ class Neo4jRealTest(unittest.TestCase):
 
         # Inserta el node - hauria de rebre un id de Neo4j
         node_id = self.graph.insertNode(node, replace=True)
-        self.assertGreaterEqual(node_id, 0)
+        self.assertTrue(_is_neo4j_id(node_id), node_id)
 
         # Después de la inserció, el node ha de tenir neo4j_id assignat
         self.assertIsNotNone(node.neo4j_id)

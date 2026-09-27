@@ -340,8 +340,8 @@ def _iter_node_attrs(
     """
     if type(source).__name__ == "Neo4jGraph" and node_ids:
         rows = source.query(
-            "MATCH (n) WHERE id(n) IN $ids "
-            "RETURN id(n) AS nid, labels(n) AS labels, properties(n) AS props",
+            "MATCH (n) WHERE elementId(n) IN $ids "
+            "RETURN elementId(n) AS nid, labels(n) AS labels, properties(n) AS props",
             params={"ids": list(node_ids)},
         )
         found: Dict[Any, Dict[str, Any]] = {}
@@ -379,9 +379,9 @@ def _iter_edges_with_attrs(
         while True:
             rows = source.query(
                 "MATCH (a)-[r]->(b) "
-                "RETURN id(a) AS src, id(b) AS dst, type(r) AS rel_type, "
+                "RETURN elementId(a) AS src, elementId(b) AS dst, type(r) AS rel_type, "
                 "properties(r) AS props "
-                "ORDER BY id(a), id(b) SKIP $offset LIMIT $limit",
+                "ORDER BY elementId(a), elementId(b) SKIP $offset LIMIT $limit",
                 params={"offset": offset, "limit": chunk_size},
             )
             if not rows:

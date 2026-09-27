@@ -235,7 +235,7 @@ class GraphDataset(IterableDataset):
     def _iter_neo4j(self, wi: Any) -> Iterator[Dict[str, Any]]:
         """Cursor-based SKIP/LIMIT pagination — one chunk per round-trip.
 
-        ``ORDER BY id(n)`` keeps the SKIP/LIMIT windows stable across
+        ``ORDER BY elementId(n)`` keeps the SKIP/LIMIT windows stable across
         round-trips (and across the disjoint windows handed to different
         DataLoader workers) — without it Neo4j does not guarantee row
         order, so a node could be yielded twice or skipped entirely.
@@ -265,8 +265,8 @@ class GraphDataset(IterableDataset):
             chunk = min(self._chunk_size, end - offset)
             rows = self._store.query(
                 f"MATCH (n{label_part}) {where_part} "
-                f"RETURN id(n) AS nid, n AS n "
-                f"ORDER BY id(n) SKIP {offset} LIMIT {chunk}",
+                f"RETURN elementId(n) AS nid, n AS n "
+                f"ORDER BY elementId(n) SKIP {offset} LIMIT {chunk}",
                 params=dict(params),
             )
             if not rows:
@@ -529,7 +529,7 @@ def to_pyg_data(
     if backend == "NetworkXGraph":
         items = list(store._node_attrs.items())   # [(nid, attrs), …]
     else:
-        rows = store.query("MATCH (n) RETURN id(n) AS nid, properties(n) AS props")
+        rows = store.query("MATCH (n) RETURN elementId(n) AS nid, properties(n) AS props")
         items = [(r["nid"], r.get("props") or {}) for r in rows]
 
     if not items:
@@ -540,7 +540,7 @@ def to_pyg_data(
         )
 
     orig_ids = [nid for nid, _ in items]
-    local_idx: Dict[int, int] = {nid: i for i, nid in enumerate(orig_ids)}
+    local_idx: Dict[Any, int] = {nid: i for i, nid in enumerate(orig_ids)}
 
     # Matriu de característiques
     node_attrs = node_attrs or []
@@ -575,7 +575,7 @@ def to_pyg_data(
         raw_edges = [
             (r["src"], r["dst"], r.get("rel_type", ""))
             for r in store.query(
-                "MATCH (a)-[r]->(b) RETURN id(a) AS src, id(b) AS dst, type(r) AS rel_type"
+                "MATCH (a)-[r]->(b) RETURN elementId(a) AS src, elementId(b) AS dst, type(r) AS rel_type"
             )
         ]
 
@@ -590,7 +590,13 @@ def to_pyg_data(
     data = Data(
         x=x,
         edge_index=edge_index,
-        node_ids=torch.tensor(orig_ids, dtype=torch.long),
+        # Ids enters (NetworkXGraph) en tensor; els de Neo4j (elementId, des
+        # de la 2.0) són cadenes, que un tensor no pot guardar: llista.
+        node_ids=(
+            torch.tensor(orig_ids, dtype=torch.long)
+            if all(isinstance(i, int) and not isinstance(i, bool) for i in orig_ids)
+            else list(orig_ids)
+        ),
     )
     if label_attr is not None:
         data.y = torch.tensor(labels, dtype=torch.long)
@@ -753,7 +759,7 @@ class SubgraphDataset(IterableDataset):
 
     def _expand_neo4j(self, node_id: int) -> List[int]:
         res = self._store.query(
-            "MATCH (n)--(m) WHERE id(n) = $nid RETURN DISTINCT id(m) AS mid",
+            "MATCH (n)--(m) WHERE elementId(n) = $nid RETURN DISTINCT elementId(m) AS mid",
             params={"nid": node_id},
         )
         return [r["mid"] for r in res if r.get("mid") is not None]
@@ -761,7 +767,7 @@ class SubgraphDataset(IterableDataset):
     def _fetch_neo4j_attrs_batch(self, node_ids: List[int]) -> Dict[int, Dict[str, Any]]:
         """Una sola query per tots els nodes del subgraf (elimina N+1)."""
         res = self._store.query(
-            "MATCH (n) WHERE id(n) IN $ids RETURN id(n) AS nid, properties(n) AS props",
+            "MATCH (n) WHERE elementId(n) IN $ids RETURN elementId(n) AS nid, properties(n) AS props",
             params={"ids": node_ids},
         )
         return {r["nid"]: (r.get("props") or {}) for r in res}
@@ -847,7 +853,7 @@ def to_hetero_edge_index_dict(
         edges = [
             (r["src"], r["dst"], r["rel"])
             for r in store.query(
-                "MATCH (n)-[r]->(m) RETURN id(n) AS src, id(m) AS dst, type(r) AS rel"
+                "MATCH (n)-[r]->(m) RETURN elementId(n) AS src, elementId(m) AS dst, type(r) AS rel"
             )
         ]
 
@@ -856,8 +862,8 @@ def to_hetero_edge_index_dict(
             for i in range(0, len(node_ids), chunk_size):
                 chunk = node_ids[i:i + chunk_size]
                 res = store.query(
-                    "MATCH (n) WHERE id(n) IN $ids "
-                    "RETURN id(n) AS nid, properties(n) AS props",
+                    "MATCH (n) WHERE elementId(n) IN $ids "
+                    "RETURN elementId(n) AS nid, properties(n) AS props",
                     params={"ids": chunk},
                 )
                 for r in res:

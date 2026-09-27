@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed (BREAKING — see MAJOR_CHANGES.md)
 
+- **Neo4j ids are `elementId()` strings instead of `id()` integers**
+  (`insertNode`/`insertRelation` results, `get_node_ids()`, `get_edges()`,
+  `neo4j_id`, `node_id` in `query()` results). `id()` is deprecated in
+  Neo4j 5; NetworkX ids stay integers. Ids are now passed to Cypher as
+  parameters, never concatenated. See MAJOR_CHANGES.md for how to migrate.
 - **Neo4j: one pk shape per label, enforced by a database constraint**
   (`Neo4jGraph(pk_constraints=True)` is the new default). Inserting a node
   whose pk shape differs from its label's raises `ValueError`; a

@@ -33,6 +33,36 @@ Keeping breaking changes isolated here means:
 
 ## Pending major changes
 
+### Neo4j: node and relation ids are `elementId()` strings, not `id()` integers
+
+**What breaks.** On `Neo4jGraph`, every id cvcdocdb exposes is now the
+`elementId()` string (e.g. `'4:3f2c…:12'`) instead of the `id()` integer:
+the return value of `insertNode`/`insertRelation`, `get_node_ids()`,
+`get_edges()`, `node.neo4j_id`, the `node_id` field of dict-filter `query()`
+results, `get_node_attrs(node_id)`/`get_edge_attrs(...)` arguments, and the
+ids `migrate()` reads from a Neo4j source. Code that stores these ids, does
+arithmetic or comparisons on them (`id >= 0`), or passes them to hand-written
+Cypher with `id(n) = $id` must switch to strings and `elementId(n) = $id`.
+`NetworkXGraph` ids stay integers. In `cvcdocdb.torch_dataloader`,
+`Data.node_ids` is a tensor for integer ids (NetworkX) and a plain list for
+Neo4j ids (a tensor can't hold strings).
+
+**Why.** `id()` is deprecated in Neo4j 5 (Neo4j logged a deprecation notice
+per query: a ~100-node migration logged 479 of them) and ids from `id()` can
+be reused after a node is deleted; `elementId()` is the supported,
+stable-for-the-lifetime-of-the-element replacement. 1.x silences the notices
+(`fix: filter Neo4j id() deprecation notices`); this removes their cause.
+
+**Also in this change.** Ids that were concatenated into Cypher
+(`"... WHERE id(a) = " + str(node_id)`) are now query parameters — with
+string ids, concatenation would have been an injection risk. A propagated
+(WeakNode) child was rebuilt with the driver's legacy integer `_id`; it now
+uses `element_id`.
+
+**Migrating to 2.0.** Treat Neo4j ids as opaque strings; replace `id(x)` by
+`elementId(x)` in your own Cypher; don't persist 1.x integer ids expecting
+them to still address the same elements.
+
 ### Neo4j: one pk shape per label, enforced by a database constraint
 
 **What breaks.** `Neo4jGraph(..., pk_constraints=True)` is the new default:
