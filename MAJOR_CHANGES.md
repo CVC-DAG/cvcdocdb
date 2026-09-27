@@ -33,5 +33,55 @@ Keeping breaking changes isolated here means:
 
 ## Pending major changes
 
-_(none yet — this file will accumulate entries here as breaking changes
-are identified and committed to this branch)_
+### Neo4j: one pk shape per label, enforced by a database constraint
+
+**What breaks.** `Neo4jGraph(..., pk_constraints=True)` is the new default:
+
+- A label has **exactly one pk shape** (the set of pk property names). The
+  first shape inserted for a label becomes its shape; inserting a node of
+  that label with another shape (or with no pk, i.e. a backend-assigned id)
+  raises `ValueError` *before* anything is written. In 1.x the same label
+  could be used with several pk shapes (e.g. `User` by `email` and by
+  `niu`).
+- After each commit, a database-level pk constraint is created for every
+  new label: `IS NODE KEY` (uniqueness + existence of the pk properties) on
+  Enterprise, `IS UNIQUE` on Community (`cvcdocdb_pkc_<Label>`). Neo4j
+  itself now rejects duplicates, also from writes that bypass cvcdocdb.
+- This needs `CONSTRAINT MANAGEMENT` on the database. Without it the
+  constraint isn't created and a `RuntimeWarning` is emitted, but the
+  one-shape rule still applies.
+- The shape rule holds across instances/processes: each label's shape is
+  read from the database's `cvcdocdb_pkc_*` constraints.
+
+**Why.** In 1.x uniqueness was only checked in Python (a `MATCH` before
+each insert), so it didn't hold against concurrent writers or writes that
+bypass cvcdocdb, and without an index every pk lookup scanned the whole
+label. A constraint gives both: real uniqueness, enforced by Neo4j, and the
+index it brings. It's only possible with a single pk shape per label, which
+is why that rule comes with it.
+
+**New API** (also added in this change):
+`GraphStore.ensure_pk_constraints(pk_shapes=None)` (no-op on
+`NetworkXGraph`) and `migrate(..., create_constraints=False)`
+(`MigrationStats.pk_constraints_created`). A constraint replaces any
+standalone pk index on the same label and properties (Neo4j refuses both),
+and the index is restored if the constraint can't be created. Existing data
+that violates the constraint (duplicates, missing pk properties, mixed
+shapes) makes `ensure_pk_constraints` fail with a clear `ValueError`.
+
+**Migrating to 2.0.**
+
+1. Graphs whose labels use a single pk shape: nothing to change; grant the
+   Neo4j user `CONSTRAINT MANAGEMENT` so the constraints get created.
+2. Graphs with several pk shapes per label: either split them into
+   different labels (e.g. `UserByEmail`/`UserByNiu`), or pass
+   `pk_constraints=False` to keep the 1.x behaviour (then
+   `auto_pk_indexes=True` gives the lookup indexes without constraints).
+3. To add the constraints to an existing database:
+   `graph.ensure_pk_constraints([(label, pk_props), ...])` — it reports any
+   data that prevents them.
+
+**Open question before cutting 2.0.** `NetworkXGraph` doesn't enforce the
+one-shape rule yet, so the two backends now differ on graphs with several
+pk shapes per label. Decide whether `NetworkXGraph` gets the same rule
+(consistent, but breaking for NetworkX users too) or stays permissive.

@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed (BREAKING — see MAJOR_CHANGES.md)
+
+- **Neo4j: one pk shape per label, enforced by a database constraint**
+  (`Neo4jGraph(pk_constraints=True)` is the new default). Inserting a node
+  whose pk shape differs from its label's raises `ValueError`; a
+  `NODE KEY` (Enterprise) / `UNIQUE` (Community) constraint is created per
+  label after each commit (needs `CONSTRAINT MANAGEMENT`). New
+  `GraphStore.ensure_pk_constraints()` and `migrate(create_constraints=...)`.
+  `pk_constraints=False` restores the 1.x behaviour.
+
 ### Added
 
 - **Primary-key indexes on Neo4j** (backward-compatible: nothing changes
