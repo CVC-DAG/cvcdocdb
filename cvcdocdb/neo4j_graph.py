@@ -7,7 +7,7 @@ with FK validation, cascade delete, and WeakNode parent propagation.
 from contextlib import contextmanager
 
 from neo4j import GraphDatabase
-from neo4j.exceptions import ConstraintError, TransactionError
+from neo4j.exceptions import ConstraintError, Forbidden, TransactionError
 from . import Node, Relation, WeakRelation
 from typing import Any, Callable, Dict, Iterator, List, Optional, Set, Tuple, Union
 from tqdm import tqdm
@@ -20,6 +20,34 @@ import warnings
 # property key used to build a WHERE/MERGE clause) to safe identifiers to
 # prevent Cypher injection via a crafted main_label / relation type / pk key.
 _CYPHER_IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+#: Prefix of the pk indexes created by :meth:`Neo4jGraph.ensure_pk_indexes`.
+PK_INDEX_PREFIX = "cvcdocdb_pk_"
+#: Pk entries that are not node properties (the backend's internal id).
+_INTERNAL_PK_KEYS = frozenset({"neo4j_id"})
+
+
+def _pk_shape(main_label: Optional[str], pk: Optional[Dict[str, Any]]) -> Optional[Tuple[str, Tuple[str, ...]]]:
+    """``(main_label, sorted pk property names)`` for a node, or ``None`` if
+    it has no pk made of real properties (e.g. backend-assigned id)."""
+    if not main_label or not pk or not _CYPHER_IDENTIFIER_RE.match(main_label):
+        return None  # etiqueta no vàlida: insertNode ja la rebutja per si sol
+    props = tuple(sorted(k for k in pk if k not in _INTERNAL_PK_KEYS))
+    if not props or not all(_CYPHER_IDENTIFIER_RE.match(prop) for prop in props):
+        return None
+    return (main_label, props)
+
+
+def _pk_index_statement(main_label: str, props: Tuple[str, ...]) -> Tuple[str, str]:
+    """``(index name, CREATE INDEX statement)`` for one pk shape. Non-unique
+    (range) index — compatible with a label used with several pk shapes."""
+    _validate_cypher_identifier(main_label, "main_label")
+    for prop in props:
+        _validate_cypher_identifier(prop, "pk property")
+    name = PK_INDEX_PREFIX + "_".join((main_label, *props))
+    columns = ", ".join(f"n.`{prop}`" for prop in props)
+    return name, f"CREATE INDEX `{name}` IF NOT EXISTS FOR (n:`{main_label}`) ON ({columns})"
 
 
 def _validate_cypher_identifier(name: Any, kind: str) -> str:
@@ -40,6 +68,143 @@ def _escape_cypher_string(value: str) -> str:
     """Escape a string value for safe interpolation inside a double-quoted
     Cypher string literal (backslashes and double quotes)."""
     return value.replace("\\", "\\\\").replace('"', '\\"')
+
+
+# ---------------------------------------------------------------------------
+# MongoDB-style dict filter → Cypher WHERE clause translation
+#
+# Mirrors the operator set and semantics of NetworkXGraph's `_match`/
+# `_matches_filter` (see networkx_graph.py) so that `Neo4jGraph.query()`
+# accepts the same dict filters as `NetworkXGraph.query()` — the two
+# backends are meant to be interchangeable without any change to client
+# code (see cvcdocdb's design goal), but `Neo4jGraph.query()` used to
+# reject dict filters outright with a ValueError.
+#
+# `main_label` is special-cased: NetworkXGraph stores it as a plain node
+# attribute, but Neo4jGraph represents it as a real node label (never a
+# property — see `_insertNode`), so filtering by it must test
+# `labels(n)` instead of a property access.
+# ---------------------------------------------------------------------------
+
+_CYPHER_COMPARISON_OPS: Dict[str, str] = {
+    "$eq": "=",
+    "$ne": "<>",
+    "$gt": ">",
+    "$gte": ">=",
+    "$lt": "<",
+    "$lte": "<=",
+}
+
+
+class _CypherFilterTranslator:
+    """Stateful helper: accumulates query parameters while building a
+    Cypher boolean expression equivalent to a MongoDB-style filter dict."""
+
+    def __init__(self, var: str = "n") -> None:
+        self._var = var
+        self._params: Dict[str, Any] = {}
+        self._counter = 0
+
+    @property
+    def params(self) -> Dict[str, Any]:
+        return self._params
+
+    def _bind(self, value: Any) -> str:
+        self._counter += 1
+        name = f"p{self._counter}"
+        self._params[name] = value
+        return f"${name}"
+
+    def _field_ref(self, field: str) -> str:
+        _validate_cypher_identifier(field, "property key")
+        return f"{self._var}.{field}"
+
+    def translate(self, filter_dict: Dict[str, Any]) -> str:
+        clauses = [self._translate_condition(key, condition) for key, condition in filter_dict.items()]
+        return " AND ".join(clauses) if clauses else "true"
+
+    def _translate_condition(self, key: str, condition: Any) -> str:
+        if key == "$or":
+            if not condition:
+                # Empty $or is a wildcard — matches NetworkXGraph's semantics.
+                return "true"
+            return "(" + " OR ".join(f"({self.translate(sub)})" for sub in condition) + ")"
+        if key == "$and":
+            return "(" + " AND ".join(f"({self.translate(sub)})" for sub in condition) + ")"
+        if key == "$not":
+            return f"NOT ({self.translate(condition)})"
+
+        if key == "main_label":
+            return self._translate_main_label(condition)
+
+        field = self._field_ref(key)
+
+        if isinstance(condition, dict):
+            sub = [self._translate_operator(field, op, expected) for op, expected in condition.items()]
+            return " AND ".join(sub) if sub else "true"
+        if isinstance(condition, list):
+            return f"{field} IN {self._bind(condition)}"
+        return f"{field} = {self._bind(condition)}"
+
+    def _translate_operator(self, field: str, op: str, expected: Any) -> str:
+        if op == "$exists":
+            return f"({field} IS NOT NULL)" if expected else f"({field} IS NULL)"
+        if op == "$regex":
+            return f"toString({field}) =~ {self._bind(expected)}"
+        if op == "$contains":
+            return f"{self._bind(expected)} IN {field}"
+        if op in ("$in", "$nin"):
+            clause = f"{field} IN {self._bind(expected)}"
+            return clause if op == "$in" else f"NOT ({clause})"
+        if op not in _CYPHER_COMPARISON_OPS:
+            raise ValueError(f"Operador desconegut: {op}")
+        return f"{field} {_CYPHER_COMPARISON_OPS[op]} {self._bind(expected)}"
+
+    def _translate_main_label(self, condition: Any) -> str:
+        labels_expr = f"labels({self._var})"
+        if isinstance(condition, dict):
+            sub = []
+            for op, expected in condition.items():
+                if op == "$eq":
+                    sub.append(f"{self._bind(expected)} IN {labels_expr}")
+                elif op == "$ne":
+                    sub.append(f"NOT ({self._bind(expected)} IN {labels_expr})")
+                elif op == "$in":
+                    sub.append(f"any(_l IN {labels_expr} WHERE _l IN {self._bind(expected)})")
+                elif op == "$nin":
+                    sub.append(f"NOT any(_l IN {labels_expr} WHERE _l IN {self._bind(expected)})")
+                elif op == "$exists":
+                    # A node always has at least one label once persisted —
+                    # mirrors NetworkXGraph, where main_label is never absent.
+                    sub.append("true" if expected else "false")
+                else:
+                    raise ValueError(f"Operador desconegut per a main_label: {op}")
+            return " AND ".join(sub) if sub else "true"
+        if isinstance(condition, list):
+            return f"any(_l IN {labels_expr} WHERE _l IN {self._bind(condition)})"
+        return f"{self._bind(condition)} IN {labels_expr}"
+
+
+def _dict_filter_to_cypher(filter_dict: Dict[str, Any], var: str = "n") -> Tuple[str, Dict[str, Any]]:
+    """Translate a MongoDB-style filter dict into a Cypher boolean
+    expression (referencing node variable *var*) plus its bound
+    parameters. Returns ``("true", {})`` for an empty filter."""
+    translator = _CypherFilterTranslator(var)
+    clause = translator.translate(filter_dict or {})
+    return clause, translator.params
+
+
+def _apply_projection(doc: Dict[str, Any], projection: Dict[str, int]) -> Dict[str, Any]:
+    """Apply a MongoDB-style projection to a properties dict — same
+    include/exclude semantics as ``NetworkXGraph``'s ``_apply_projection``
+    (kept as an independent copy so the two backend modules stay
+    decoupled)."""
+    if not projection:
+        return doc
+    include = any(v == 1 for v in projection.values())
+    if include:
+        return {k: doc.get(k) for k in projection if k in doc}
+    return {k: v for k, v in doc.items() if k not in projection}
 
 
 class Neo4jGraph:
@@ -66,6 +231,17 @@ class Neo4jGraph:
         user: Authentication username.
         password: Authentication password.
         database: Target database name. Defaults to the Neo4j default.
+        auto_pk_indexes: If True, after each commit (a standalone
+            ``insertNode`` or a whole :meth:`batch`), create the pk indexes
+            for any pk shape not indexed yet (:meth:`ensure_pk_indexes`).
+            A failure (e.g. missing ``INDEX MANAGEMENT``) only warns — the
+            data was already committed. Off by default.
+        **driver_config: Extra keyword arguments forwarded unchanged to
+            ``neo4j.GraphDatabase.driver()`` — e.g.
+            ``connection_timeout``/``connection_acquisition_timeout`` to
+            bound how long connecting to an unresponsive server may take
+            (the driver's own defaults otherwise). Note these do not bound a
+            query already running on a server that stops responding.
     """
 
     def __init__(
@@ -74,8 +250,15 @@ class Neo4jGraph:
         user: str,
         password: str,
         database: Optional[str] = None,
+        auto_pk_indexes: bool = False,
+        **driver_config: Any,
     ) -> None:
-        self._driver = GraphDatabase.driver(url, auth=(user, password))
+        self._driver = GraphDatabase.driver(url, auth=(user, password), **driver_config)
+        self._auto_pk_indexes = auto_pk_indexes
+        # Pk shapes (main_label, props) inserted through this instance, and
+        # the ones already indexed (or given up on) — see ensure_pk_indexes.
+        self._pk_shapes: Set[Tuple[str, Tuple[str, ...]]] = set()
+        self._indexed_pk_shapes: Set[Tuple[str, Tuple[str, ...]]] = set()
         self._tx = None
         self._closed = False
         # Internal tracking: neo4j_id -> pk dict (for get_node_pks)
@@ -186,19 +369,7 @@ class Neo4jGraph:
                 # print(node)
                 self._tx.commit()
         except ConstraintError as err:
-            try:
-                self._tx.rollback()
-            except Exception:
-                pass
-            try:
-                self._tx.close()
-            except Exception:
-                pass
-            self._tx = None
-            raise RuntimeError("Duplicate key: " + err.message) from err
-        except TransactionError as err:
-            msg = str(err)
-            if "Duplicate key" in msg or "NODE KEY" in msg or "Transaction failed" in msg or "ConstraintValidationFailed" in msg:
+            if inici:
                 try:
                     self._tx.rollback()
                 except Exception:
@@ -208,17 +379,26 @@ class Neo4jGraph:
                 except Exception:
                     pass
                 self._tx = None
+            raise RuntimeError("Duplicate key: " + err.message) from err
+        except TransactionError as err:
+            msg = str(err)
+            is_duplicate = (
+                "Duplicate key" in msg or "NODE KEY" in msg
+                or "Transaction failed" in msg or "ConstraintValidationFailed" in msg
+            )
+            if inici:
+                try:
+                    self._tx.rollback()
+                except Exception:
+                    pass
+                try:
+                    self._tx.close()
+                except Exception:
+                    pass
+                self._tx = None
+            if is_duplicate:
                 raise RuntimeError("Duplicate key: " + msg) from err
             print(err)
-            try:
-                self._tx.rollback()
-            except Exception:
-                pass
-            try:
-                self._tx.close()
-            except Exception:
-                pass
-            self._tx = None
             raise
         finally:
             if inici and self._tx is not None:
@@ -227,6 +407,8 @@ class Neo4jGraph:
                 except Exception:
                     pass
                 self._tx = None
+        if inici:
+            self._auto_index_new_pk_shapes()
         return id  # only reached if no exception was raised above
 
     def deleteNode(
@@ -331,7 +513,11 @@ class Neo4jGraph:
             return False
         except TransactionError as err:
             msg = str(err)
-            if "Duplicate key" in msg or "NODE KEY" in msg or "Transaction failed" in msg or "ConstraintValidationFailed" in msg:
+            is_duplicate = (
+                "Duplicate key" in msg or "NODE KEY" in msg
+                or "Transaction failed" in msg or "ConstraintValidationFailed" in msg
+            )
+            if inici:
                 try:
                     self._tx.rollback()
                 except Exception:
@@ -340,10 +526,9 @@ class Neo4jGraph:
                     self._tx.close()
                 except Exception:
                     pass
+            if is_duplicate:
                 raise RuntimeError("Duplicate key: " + msg) from err
             print(err)
-            self._tx.rollback()
-            self._tx.close()
             raise
         else:
             if inici:
@@ -390,9 +575,10 @@ class Neo4jGraph:
                 )
             except TransactionError as err:
                 print(err)
-                self._tx.rollback()
-                self._tx.close()
-                self._tx = None
+                if inici:
+                    self._tx.rollback()
+                    self._tx.close()
+                    self._tx = None
                 raise
             else:
                 if inici:
@@ -488,9 +674,10 @@ class Neo4jGraph:
             raise
         except TransactionError as err:
             print(err)
-            self._tx.rollback()
-            self._tx.close()
-            self._tx = None
+            if inici:
+                self._tx.rollback()
+                self._tx.close()
+                self._tx = None
             raise
         else:
             if inici:
@@ -541,7 +728,8 @@ class Neo4jGraph:
         """Return all internal node ids in the graph."""
         if self._closed:
             return []
-        result = self._session.run("MATCH (n) RETURN id(n) AS nid")
+        runner = self._tx if self._tx is not None else self._session
+        result = runner.run("MATCH (n) RETURN id(n) AS nid")
         return [record["nid"] for record in result]
 
     def get_nodes(self) -> List[int]:
@@ -590,32 +778,125 @@ class Neo4jGraph:
         }
 
     @contextmanager
-    def batch(self) -> Iterator[None]:
-        """Group multiple ``insertNode``/``insertRelation`` calls into a
-        single Neo4j transaction, committing once at the end instead of
-        once per call — substantially faster for bulk writes (see
-        :func:`cvcdocdb.migration.migrate`).
+    def batch(self, write: bool = True) -> Iterator[None]:
+        """Group multiple calls into a single Neo4j transaction, committing
+        once at the end instead of once per call — substantially faster
+        for bulk writes (see :func:`cvcdocdb.migration.migrate`).
 
         ``insertNode``/``insertRelation`` already reuse ``self._tx`` when
         one is open instead of starting their own (see the ``inici`` /
-        nested-parent-insert handling above); this just opens that same
-        transaction from the outside and commits/rolls back once for the
-        whole block. Nesting is safe — an inner ``batch()`` call while one
-        is already open is a no-op.
+        nested-parent-insert handling above), and :meth:`query`/
+        :meth:`get_node_ids` do the same, so plain reads made inside this
+        block run in the same transaction too — giving a consistent
+        snapshot for the whole block instead of one read-committed view
+        per call. This just opens that transaction from the outside and
+        commits/rolls back once for the whole block. Nesting is safe — an
+        inner ``batch()`` call while one is already open is a no-op.
+
+        Args:
+            write: Accepted for interface symmetry with
+                ``NetworkXGraph.batch()`` (which uses it to skip an
+                unnecessary resave when the block is read-only). Neo4j has
+                no equivalent distinction worth making here — committing a
+                transaction that made no writes is a no-op — so this is
+                ignored.
         """
         if self._tx is not None:
             yield
             return
         self._tx = self._session.begin_transaction()
+        committed = False
         try:
             yield
             self._tx.commit()
+            committed = True
         except Exception:
             self._tx.rollback()
             raise
         finally:
             self._tx.close()
             self._tx = None
+        if committed:
+            self._auto_index_new_pk_shapes()
+
+    # ------------------------------------------------------------------
+    # Primary-key indexes
+    # ------------------------------------------------------------------
+
+    def ensure_pk_indexes(self, pk_shapes: Optional[Any] = None) -> List[str]:
+        """Create a (non-unique) index on the pk properties of every pk
+        shape that doesn't have an equivalent index yet. Idempotent.
+
+        Every ``insertNode``/pk lookup runs ``MATCH (n:Label) WHERE <pk>``;
+        without an index Neo4j scans every node of the label, so bulk writes
+        (e.g. :func:`cvcdocdb.migration.migrate`) grow quadratically.
+
+        Args:
+            pk_shapes: Iterable of ``(main_label, pk_property_names)``.
+                Defaults to the shapes inserted through this instance.
+
+        Returns:
+            Names of the indexes created by this call. An existing index on
+            the same label and properties (whatever its name) counts as
+            present and is reused.
+
+        Raises:
+            RuntimeError: Inside :meth:`batch` or any open transaction —
+                Neo4j doesn't allow schema changes in a transaction that
+                also writes data.
+            PermissionError: If the user lacks ``INDEX MANAGEMENT`` on the
+                database.
+        """
+        if self._tx is not None:
+            raise RuntimeError(
+                "ensure_pk_indexes() can't run inside batch() or an open transaction: "
+                "Neo4j doesn't allow schema changes in a transaction that writes data"
+            )
+        if pk_shapes is None:
+            shapes = set(self._pk_shapes)
+        else:
+            shapes = {(label, tuple(sorted(props))) for label, props in pk_shapes if props}
+
+        try:
+            existing = {
+                (row["labelsOrTypes"][0], frozenset(row["properties"]))
+                for row in self._session.run(
+                    "SHOW INDEXES YIELD entityType, labelsOrTypes, properties "
+                    "WHERE entityType = 'NODE' AND labelsOrTypes IS NOT NULL AND size(labelsOrTypes) = 1 "
+                    "RETURN labelsOrTypes, properties"
+                )
+            }
+            created: List[str] = []
+            for label, props in sorted(shapes):
+                if (label, frozenset(props)) not in existing:
+                    name, statement = _pk_index_statement(label, props)
+                    self._session.run(statement).consume()
+                    created.append(name)
+                self._indexed_pk_shapes.add((label, props))
+        except Forbidden as exc:
+            raise PermissionError(
+                f"Creating pk indexes requires INDEX MANAGEMENT on the database: {exc.message}"
+            ) from exc
+        return created
+
+    def _auto_index_new_pk_shapes(self) -> None:
+        """``auto_pk_indexes``: index pk shapes seen since the last commit.
+        Never raises — the data is already committed at this point."""
+        if not self._auto_pk_indexes:
+            return
+        pending = self._pk_shapes - self._indexed_pk_shapes
+        if not pending:
+            return
+        try:
+            self.ensure_pk_indexes(pending)
+        except Exception as exc:  # noqa: BLE001 - reported, never fatal
+            warnings.warn(
+                f"cvcdocdb: could not create pk index(es) for {sorted(pending)}: {exc}",
+                RuntimeWarning,
+                stacklevel=3,
+            )
+        # Don't retry the same shapes on every later commit.
+        self._indexed_pk_shapes |= pending
 
     def get_edges(self) -> List[Tuple[int, int, str]]:
         """Return all edges as ``(src_id, dst_id, rel_type)`` tuples."""
@@ -669,34 +950,56 @@ class Neo4jGraph:
         limit_val: Optional[int] = None,
         params: Optional[Dict[str, Any]] = None,
     ) -> List[Dict[str, Any]]:
-        """Execute a raw Cypher query and return results as a list of dicts.
+        """Query nodes using MongoDB-style filters or execute Cypher.
 
         **Hybrid API** — the first argument accepts either:
 
+        * **dict** — MongoDB-style filter matching against ``main_label``
+          (tested against the node's real Neo4j labels, not a property —
+          see module notes above) and node attributes. Supports the same
+          operators as ``NetworkXGraph.query()``: ``$eq``, ``$ne``, ``$gt``,
+          ``$gte``, ``$lt``, ``$lte``, ``$in``, ``$nin``, ``$exists``,
+          ``$regex``, ``$contains``, and the logical combinators ``$or``,
+          ``$and``, ``$not``.
         * **str** — a Cypher query string (``MATCH``, ``CREATE``,
           ``DELETE``, ``SET``, ``RETURN``, ``ORDER BY``, ``LIMIT``,
           aggregations, parameter substitution via ``$name``).
-        * **dict** — not supported by Neo4jGraph (raises
-          ``ValueError``); use a Cypher string instead.
 
-        Each record is a dict mapping return aliases to values.  Node values
-        are dicts with ``labels`` and ``properties`` keys.  Relation values
-        are dicts with ``type``, ``start_node``, ``end_node``, and
-        ``properties`` keys.  Primitive values are returned as-is.
+        For **dict** filters, each record is
+        ``{"node_id": <neo4j internal id>, "main_label": <first label>,
+        "properties": {...}}`` — the same shape ``NetworkXGraph.query()``
+        returns for dict filters, so client code is portable between the
+        two backends without changes.
+
+        For **str** (Cypher) queries, each record is a dict mapping return
+        aliases to values. Node values are dicts with ``labels`` and
+        ``properties`` keys. Relation values are dicts with ``type``,
+        ``start_node``, ``end_node``, and ``properties`` keys. Primitive
+        values are returned as-is.
 
         Args:
-            filter_dict: Cypher query string for Neo4jGraph.
-                MongoDB-style dicts are not supported — use Cypher instead.
-            projection: Ignored for Cypher queries (use ``RETURN`` aliases).
-            sort: Ignored for Cypher queries (use ``ORDER BY``).
-            limit_val: Ignored for Cypher queries (use ``LIMIT``).
-            params: Optional parameter dict for ``$name`` substitution.
+            filter_dict: Filter dict for MongoDB-style queries, or Cypher
+                string for Cypher-style queries.
+            projection: Dict of fields to include (1) or exclude (0).
+                Applied to ``properties`` for dict filters; ignored for
+                Cypher queries (use ``RETURN`` aliases instead).
+            sort: Tuple of ``(field_name, direction)`` where direction is
+                ``1`` (ascending) or ``-1`` (descending). Only used for
+                dict filters; ignored for Cypher queries (use ``ORDER BY``).
+            limit_val: Maximum number of results. Only used for dict
+                filters; ignored for Cypher queries (use ``LIMIT``).
+            params: Optional parameter dict for ``$name`` substitution in
+                Cypher queries. Ignored for dict filters.
 
         Returns:
-            A list of dicts, one per result record.
+            A list of dicts, one per matching node (dict-style) or one per
+            result record (Cypher-style).
 
         Example:
-            >>> graph.query("MATCH (n) RETURN n LIMIT 5")
+            >>> # MongoDB-style
+            >>> graph.query({"main_label": "Person", "age": {"$gt": 25}})
+            >>> # Cypher-style
+            >>> graph.query("MATCH (n:Person) RETURN n LIMIT 5")
             >>> graph.query(
             ...     "MATCH (n:Person {name: $name}) RETURN n",
             ...     params={"name": "Alice"},
@@ -704,12 +1007,12 @@ class Neo4jGraph:
         """
         if self._closed:
             raise RuntimeError("Cannot query a closed Neo4jGraph.")
-        if isinstance(filter_dict, dict):
-            raise ValueError(
-                "Neo4jGraph.query() does not support MongoDB-style dict filters. "
-                "Use a Cypher query string instead."
-            )
-        result = self._session.run(
+
+        if isinstance(filter_dict, dict) or filter_dict is None:
+            return self._query_dict(filter_dict or {}, projection, sort, limit_val)
+
+        runner = self._tx if self._tx is not None else self._session
+        result = runner.run(
             filter_dict or "", parameters=params or {}
         )
         records: List[Dict[str, Any]] = []
@@ -718,6 +1021,45 @@ class Neo4jGraph:
             for key, value in record.items():
                 converted[key] = _convert_neo4j_value(value)
             records.append(converted)
+        return records
+
+    def _query_dict(
+        self,
+        filter_dict: Dict[str, Any],
+        projection: Optional[Dict[str, int]],
+        sort: Optional[Tuple[str, int]],
+        limit_val: Optional[int],
+    ) -> List[Dict[str, Any]]:
+        """MongoDB-style branch of :meth:`query` — translates *filter_dict*
+        to Cypher via :func:`_dict_filter_to_cypher` and returns results
+        shaped like ``NetworkXGraph.query()``'s dict-mode output."""
+        where_clause, bound_params = _dict_filter_to_cypher(filter_dict, var="n")
+        cypher = f"MATCH (n) WHERE {where_clause} RETURN n AS n, id(n) AS __node_id"
+
+        if sort is not None:
+            field, direction = sort
+            _validate_cypher_identifier(field, "sort field")
+            cypher += f" ORDER BY n.{field} {'DESC' if direction == -1 else 'ASC'}"
+
+        if limit_val is not None:
+            bound_params["__limit"] = limit_val
+            cypher += " LIMIT $__limit"
+
+        runner = self._tx if self._tx is not None else self._session
+        result = runner.run(cypher, parameters=bound_params)
+
+        records: List[Dict[str, Any]] = []
+        for record in result:
+            node = _convert_neo4j_value(record["n"])
+            labels = node.get("labels") or []
+            props = node.get("properties") or {}
+            if projection:
+                props = _apply_projection(props, projection)
+            records.append({
+                "node_id": record["__node_id"],
+                "main_label": labels[0] if labels else "Node",
+                "properties": props,
+            })
         return records
 
     # ------------------------------------------------------------------
@@ -1113,12 +1455,14 @@ class Neo4jGraph:
                 f"MATCH (a)-[r:`{rel_type}`]->(b) RETURN a, r, b LIMIT 1"
             ).single()
             if sample:
-                for k in sample["a"]:
-                    if k not in ("element_id",):
-                        src_labels.add(sample["a"].get("labels", ("Node",))[0])
-                for k in sample["b"]:
-                    if k not in ("element_id",):
-                        dst_labels.add(sample["b"].get("labels", ("Node",))[0])
+                # .labels is the real driver Node attribute (a frozenset);
+                # .get("labels", ...) would look up a *property* named
+                # "labels" instead, which real data never has, so it always
+                # fell back to the default "Node".
+                a_labels = list(sample["a"].labels)
+                src_labels.add(a_labels[0] if a_labels else "Node")
+                b_labels = list(sample["b"].labels)
+                dst_labels.add(b_labels[0] if b_labels else "Node")
                 for k, v in sample["r"].items():
                     if k not in ("element_id",):
                         props[k] = self._python_type(v)
@@ -1143,8 +1487,16 @@ class Neo4jGraph:
                 info = label_results[label]
                 props = info["properties"]
                 count = info["count"]
-                pk_fields = [k for k in props if k not in ("pk", "main_label", "labels")]
-                pk_str = f"[{', '.join(repr(f) for f in pk_fields[:2])}]" if pk_fields else "[]"
+                # Neo4j never persists which properties form the real pk
+                # (a purely client-side concept applied at insert time —
+                # see Node.get_attrs()'s docstring). Every property is
+                # used here instead of guessing at a slice of them, which
+                # is honest about that limitation rather than arbitrarily
+                # wrong (the previous code took pk_fields[:2] — literally
+                # "the first two properties found", regardless of whether
+                # they were actually part of the pk).
+                pk_fields = list(props)
+                pk_str = f"[{', '.join(repr(f) for f in pk_fields)}]" if pk_fields else "[]"
 
                 lines.append(f"  {label}:")
                 lines.append(f"    class_name: {label[0].upper() + label[1:] if label else 'Node'}")
@@ -1215,6 +1567,9 @@ class Neo4jGraph:
         update: bool = False,
         replace: bool = False,
     ) -> int:
+        shape = _pk_shape(node.main_label, node._primary_key)
+        if shape is not None:
+            self._pk_shapes.add(shape)
         # Validate every label (main_label + alternative_labels), not just
         # main_label — _create_node/_update_node splice the full label list
         # into the Cypher CREATE/MERGE text. This also covers nodes reached

@@ -6,3 +6,5 @@
 pytest
 python-dotenv
 testcontainers
+pyyaml
+build

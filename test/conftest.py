@@ -142,6 +142,12 @@ def pytest_configure(config):
     config.addinivalue_line(
         "markers", "slow: Neo4j integration tests (require real Neo4j)"
     )
+    config.addinivalue_line(
+        "markers",
+        "release: expensive cross-backend comparison tests (migration + "
+        "schema codegen) — run only on main, right before publishing a "
+        "new version. See test/README.md.",
+    )
     _maybe_start_docker_neo4j()
 
 
@@ -171,10 +177,20 @@ def pytest_collection_modifyitems(config, items):
         "test_neo4j_real.py",
     }
 
+    release_files = {
+        "test_release_schema_migration.py",
+    }
+
     neo4j_ok = _neo4j_reachable()
     skip_unreachable = pytest.mark.skip(
         reason="Neo4j unreachable (no server at NEO4J_DEV_URL/NEO4J_URL) — "
         "skipping 'slow' test instead of timing out on connection"
+    )
+    run_release = os.environ.get("CVCDOCDB_RUN_RELEASE_TESTS") == "1"
+    skip_release = pytest.mark.skip(
+        reason="release-only test (expensive cross-backend migration + "
+        "schema codegen comparison) — set CVCDOCDB_RUN_RELEASE_TESTS=1 to "
+        "run it. Intended for main, right before publishing a new version."
     )
 
     for item in items:
@@ -185,7 +201,13 @@ def pytest_collection_modifyitems(config, items):
             item.add_marker(pytest.mark.integration)
         elif filename in neo4j_files:
             item.add_marker(pytest.mark.slow)
+        elif filename in release_files:
+            item.add_marker(pytest.mark.release)
+            item.add_marker(pytest.mark.slow)
         # test_graph_store_contract.py has individual markers on each method
 
-        if not neo4j_ok and "slow" in {m.name for m in item.iter_markers()}:
+        markers = {m.name for m in item.iter_markers()}
+        if not neo4j_ok and "slow" in markers:
             item.add_marker(skip_unreachable)
+        if not run_release and "release" in markers:
+            item.add_marker(skip_release)
