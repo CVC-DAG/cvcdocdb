@@ -27,6 +27,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   file (rebuilt from the nodes for pre-2.0 pickles). `pk_constraints=False`
   restores the 1.x behaviour.
 
+## [1.4.0] - 2026-09-28
+
 ### Added
 
 - **Primary-key indexes on Neo4j** (backward-compatible: nothing changes
@@ -51,6 +53,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`NetworkXGraph.schema_yaml()` detected a WeakNode's parent
+  non-deterministically**, so the generated entity classes could change
+  from one run to the next. When two labels tied as parent candidates
+  (same pk overlap), the first one found while iterating a `set` of label
+  names won — an order that changes with each Python process
+  (`PYTHONHASHSEED`); the release test
+  `test_regiofisica_generated_as_weaknode_with_fons_parent` failed about
+  half of the time, also on 1.3.0. Ties are now broken by the real evidence
+  — the candidate with a propagating (`_propagate`) edge to the child label
+  — and, as a last resort, alphabetically.
 - **Neo4jGraph no longer floods the log with `id()` deprecation notices.**
   cvcdocdb uses `id()` throughout (its public node ids are integers;
   `elementId()` returns strings, a breaking change kept for the next major
