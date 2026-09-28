@@ -666,13 +666,19 @@ class NetworkXGraph(GraphStore):
         label_parent: Dict[str, str] = {}       # child -> parent label
         label_child_pk: Dict[str, Set[str]] = {}  # child -> child-specific PK fields
 
-        all_labels = set(label_props.keys())
+        all_labels = sorted(label_props.keys())
+        # (parent_label, child_label) pairs actually joined by a WeakRelation
+        # edge (_propagate=True): the evidence used to break ties below.
+        propagating_pairs = {
+            (self._node_attrs.get(u, {}).get("main_label"), self._node_attrs.get(v, {}).get("main_label"))
+            for (u, v, _key), edge_attrs in self._edge_attrs.items()
+            if (edge_attrs or {}).get("_propagate")
+        }
         for child_label in all_labels:
             child_pks = label_pk_fields.get(child_label, set())
             if not child_pks:
                 continue
-            best_parent = None
-            best_overlap = 0
+            candidates = []
             for parent_label in all_labels:
                 if parent_label == child_label:
                     continue
@@ -681,11 +687,17 @@ class NetworkXGraph(GraphStore):
                     continue
                 # child_pks is a proper superset of parent_pks
                 if child_pks > parent_pks:
-                    overlap = len(child_pks & parent_pks)
-                    if overlap > best_overlap:
-                        best_overlap = overlap
-                        best_parent = parent_label
-            if best_parent is not None:
+                    candidates.append((
+                        len(child_pks & parent_pks),
+                        (parent_label, child_label) in propagating_pairs,
+                        parent_label,
+                    ))
+            if candidates:
+                # Largest pk overlap; on a tie, the candidate with a real
+                # propagating edge to this label, then the first by name.
+                # Never the iteration order of a set of strings: it changes
+                # with PYTHONHASHSEED, and so did the generated code.
+                best_parent = sorted(candidates, key=lambda c: (-c[0], not c[1], c[2]))[0][2]
                 label_parent[child_label] = best_parent
                 label_child_pk[child_label] = child_pks - label_pk_fields[best_parent]
 
