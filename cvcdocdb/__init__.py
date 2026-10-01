@@ -6,9 +6,24 @@ try:
 except PackageNotFoundError:  # running from a source tree that isn't installed
     __version__ = "0.0.0.dev0"
 
+import warnings as _warnings
+
 from .base import *
-from .drm_entities import *
 from .graph_store import GraphLockTimeout, GraphStore
+
+# cvcdocdb.drm_entities és un mòdul opcional: el paquet ja no l'importa.
+# Aquests noms continuen accessibles des de `cvcdocdb` (i amb `import *`),
+# però amb un DeprecationWarning; a la propera versió major se suprimeixen.
+_DRM_ENTITY_NAMES = (
+    "assert_on_properties",
+    "Individu", "IndividuPadro", "IndividuFoto",
+    "Lloc", "LlocPadro", "LlocFoto",
+    "DocumentCultural", "Fons", "ActaTemporal",
+    "EntitatAmbNom", "IndividuAgregat", "Esdeventiment",
+    "Layout", "RegioFisica", "OCRTranscript",
+    "Padro", "Fotografia", "BOE",
+    "NODES", "EDGES",
+)
 
 
 def __getattr__(name):
@@ -31,8 +46,24 @@ def __getattr__(name):
         from .networkx_graph import NetworkXGraph
 
         return NetworkXGraph
+    if name in _DRM_ENTITY_NAMES:
+        _warnings.warn(
+            f"Importing {name!r} from 'cvcdocdb' is deprecated: cvcdocdb.drm_entities is "
+            f"an optional module. Use 'from cvcdocdb.drm_entities import {name}' instead; "
+            "the top-level name will be removed in the next major version.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        from . import drm_entities
+
+        return getattr(drm_entities, name)
     if name in ("Text2Cypher", "Text2CypherResult", "Text2CypherError", "CallableLLM"):
         from . import text2cypher
 
         return getattr(text2cypher, name)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+# `from cvcdocdb import *` exporta el mateix que abans, entitats DRM incloses
+# (que passen per __getattr__ i, per tant, avisen).
+__all__ = [_name for _name in dict(globals()) if not _name.startswith("_")] + list(_DRM_ENTITY_NAMES)

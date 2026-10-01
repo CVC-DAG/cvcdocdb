@@ -49,6 +49,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Deprecated
 
+- **`cvcdocdb.drm_entities` is now an optional module.** `import cvcdocdb`
+  no longer imports it. Import the DRM entities from it:
+  `from cvcdocdb.drm_entities import IndividuPadro`. `from cvcdocdb import
+  IndividuPadro` (and `import *`) still works for every DRM entity name but
+  emits a `DeprecationWarning`; the top-level names will be removed in the
+  next major version. `Atribut` (the `Valor` node behind
+  `be_value_properties`) is part of the core and moves to `cvcdocdb.base`;
+  it's still importable from `cvcdocdb.drm_entities` and from `cvcdocdb`.
+
 - **WeakNode chains deeper than `MAX_WEAK_CHAIN_DEPTH` = 3 nodes** (the root
   plus two levels of WeakNode). Creating a deeper WeakNode still works,
   inheriting the composite key as before, but now emits a
@@ -131,6 +140,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   results.
 
 ### Documentation
+
 
 - README, Sphinx docs and `test/README.md` now state explicitly that
   cvcdocdb targets Neo4j Community Edition, and that the Enterprise features

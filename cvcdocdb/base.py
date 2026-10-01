@@ -238,7 +238,6 @@ class Node:
         # is a no-op.
         be_value_properties = getattr(type(self), "be_value_properties", ())
         if be_value_properties:
-            from .drm_entities import Atribut  # local import: avoids a cycle
             for prop in be_value_properties:
                 if prop in kwargs:
                     value = kwargs.pop(prop)
@@ -645,4 +644,30 @@ class WeakRelation(Relation):
         """
         super().__init__(
             src, dst, rel_type, _propagate=kwargs.pop("propagate", True), **kwargs
+        )
+
+
+class Atribut(Node):
+    """A value node wrapping a string attribute.
+
+    Extends Node to represent a string value as a graph node with
+    label "Valor" and a ``name`` primary key derived from the value.
+
+    Args:
+        value: The string value to wrap.
+        **kwargs: Additional node attributes passed to Node.__init__.
+    """
+
+    def __init__(self, value: str, **kwargs: Any) -> None:
+        """Initialize an Atribut value node.
+
+        Args:
+            value: The string value. Stored as ``{"name": value.lower()}`` pk.
+            **kwargs: Passed to Node.__init__ (alternative_labels, etc.).
+        """
+        Node.__init__(
+            self,
+            pk={"name": value.lower()},
+            main_label="Valor",
+            **kwargs,
         )
