@@ -86,6 +86,18 @@ pytest test/ -m slow
 docker compose -f docker-compose.neo4j.yml down
 ```
 
+### Memgraph tests
+
+`test_memgraph_graph.py` needs a Memgraph server at `MEMGRAPH_URL`
+(`MEMGRAPH_USER`/`MEMGRAPH_PASSWORD`, `MEMGRAPH_DATABASE` optional). If nothing
+answers there (default `bolt://localhost:7688`) and Docker plus
+`testcontainers` are available, `conftest.py` starts a disposable
+`memgraph/memgraph:3.13.1` container on host port 7688, next to the Neo4j one
+on 7687. These tests are skipped only when Memgraph is unreachable, whether or
+not Neo4j is available. `MemgraphMatchesNeo4jTest` runs every propagation
+scenario on both backends and compares the resulting graphs and errors, so it
+needs both.
+
 ### Neo4j Enterprise tests (optional, not run in CI)
 
 CI and the automatic Docker container use **Neo4j Community**, so the
@@ -123,6 +135,7 @@ pytest test/test_neo4j_enterprise.py -m slow
 - `test_create_graph.py` — Neo4j node/relation creation
 - `test_neo4j_real.py` — Real Neo4j workflow tests
 - `test_graph_store_contract.py::TestNeo4jGraph` — Contract tests
+- `test_memgraph_graph.py` — Memgraph backend: contract tests, propagation policy, comparison with Neo4j
 - `test_neo4j_enterprise.py` — Community default / opt-in Enterprise mode (Enterprise server tests need `NEO4J_ENTERPRISE_URL`)
 
 ## CI

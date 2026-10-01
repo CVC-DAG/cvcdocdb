@@ -11,7 +11,7 @@ CVCDocDB
 Features
 --------
 
-* **Two backends**: Full Neo4j integration (``Neo4jGraph``, targeting Neo4j Community Edition; opt-in Enterprise-only features, see *Neo4j editions* below) or in-memory NetworkX (``NetworkXGraph``) for testing and tutorials
+* **Two backends**: Full Neo4j integration (``Neo4jGraph``, targeting Neo4j Community Edition; opt-in Enterprise-only features, see *Neo4j editions* below) a Memgraph backend (``MemgraphGraph``, same propagation policy as Neo4j), or in-memory NetworkX (``NetworkXGraph``) for testing and tutorials
 * **WeakNode hierarchy**: Child entities with composite primary keys and automatic cascade delete through parent-child edges
 * **ON DELETE strategies**: CASCADE, RESTRICT, SET NULL -- choose the deletion semantics that fit your use case
 * **Semantic entities**: Domain-specific node types such as ``IndividuPadro``, ``LlocPadro``, and ``Fotografia``
@@ -179,6 +179,38 @@ Programmatic usage
     print(load_karate_club(graph))
     print(load_bibliografia_openalex(graph, query="graph database", per_page=15))
     graph.close()
+
+Memgraph backend
+----------------
+
+``MemgraphGraph`` stores the graph in `Memgraph <https://memgraph.com/>`_. It
+subclasses ``Neo4jGraph`` (Memgraph speaks Bolt and Cypher, and uses the same
+``neo4j`` driver), so the API and the **change-propagation policy** are
+identical to the Neo4j backend:
+
+* **Insert**: a WeakNode inserts its parent, and the parent→child edge
+  carries ``_propagate=TRUE``. A missing parent, child keys that don't match
+  the parent's, or a duplicate key are refused. Dependencies become ``Valor``
+  nodes.
+* **Update**: ``update=True`` merges attributes. ``replace=True`` deletes the
+  old node with propagation (its WeakNode descendants too) and recreates it.
+* **Delete**: RESTRICT by default, ``propagation=True`` for WeakNode
+  descendants, ``detach=True`` (CASCADE), or ``on_delete="set_null"``.
+* **Relations**: FK validation of both endpoints, plus ``update``/``replace``.
+
+.. code-block:: python
+
+    from cvcdocdb import MemgraphGraph
+
+    graph = MemgraphGraph("bolt://localhost:7687", "", "")  # no auth by default
+
+``test/test_memgraph_graph.py`` runs the same propagation scenarios on Neo4j
+and Memgraph and checks that both leave the same graph and raise the same
+errors. The only Memgraph-specific code is pk indexes (``SHOW INDEX INFO``,
+``CREATE INDEX ON :Label(props)``) and label/relationship-type listing for
+``schema_yaml()``. The Neo4j Enterprise features are not available on
+Memgraph (``EnterpriseFeatureError``), and neither is ``drop_constraint()``.
+Tested with Memgraph 3.13 (Community).
 
 Neo4j editions: Community (default) and Enterprise
 --------------------------------------------------

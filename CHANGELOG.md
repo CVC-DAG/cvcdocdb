@@ -9,6 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Memgraph backend: `MemgraphGraph`** (`cvcdocdb.memgraph_graph`, also
+  `from cvcdocdb import MemgraphGraph`). A subclass of `Neo4jGraph` (Memgraph
+  speaks Bolt and Cypher), so it has the same API and the same
+  change-propagation policy on insert (WeakNode parents, `_propagate` edges,
+  FK and key checks, dependencies), update (`update`/`replace`) and delete
+  (RESTRICT, propagation, CASCADE, SET NULL). Only pk indexes
+  (`SHOW INDEX INFO`, `CREATE INDEX ON :Label(props)`) and label and
+  relationship-type listing (`schema_yaml()`) use Memgraph-specific Cypher.
+  Neo4j Enterprise features and `drop_constraint()` are not available.
+  Tested with Memgraph 3.13 Community. `test/test_memgraph_graph.py` runs the
+  `GraphStore` contract suite on Memgraph, plus 20 propagation scenarios that
+  must leave the same graph and errors as on Neo4j. CI gets a Memgraph
+  service, and `conftest.py` starts a Memgraph container (port 7688) when
+  none is reachable.
+- `Neo4jGraph` gains four internal backend hooks, with no behaviour change:
+  `_existing_node_index_keys()`, `_pk_index_statement()`, `_list_labels()`
+  and `_list_relationship_types()`.
+
 - **Opt-in Neo4j Enterprise mode** (backward-compatible: the default is
   unchanged). `Neo4jGraph(..., edition="community")` is the default, and
   cvcdocdb keeps targeting and testing Neo4j Community Edition.

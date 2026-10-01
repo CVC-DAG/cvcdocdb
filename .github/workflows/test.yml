@@ -22,6 +22,13 @@ jobs:
         ports:
           - 7687:7687
           - 7474:7474
+      memgraph:
+        image: memgraph/memgraph:3.13.1
+        env:
+          MEMGRAPH_USER: memgraph
+          MEMGRAPH_PASSWORD: testpassword123
+        ports:
+          - 7688:7687
 
     env:
       # Consumed by test/conftest.py: since a real server already answers
@@ -31,6 +38,9 @@ jobs:
       NEO4J_DEV_USER: neo4j
       NEO4J_DEV_PASSWORD: testpassword123
       NEO4J_DEV_DATABASE: neo4j
+      MEMGRAPH_URL: bolt://localhost:7688
+      MEMGRAPH_USER: memgraph
+      MEMGRAPH_PASSWORD: testpassword123
 
     steps:
       - name: Checkout
@@ -54,6 +64,15 @@ jobs:
             sleep 2
           done
           echo "Neo4j did not become reachable in time" >&2
+          exit 1
+
+      - name: Wait for Memgraph to accept Bolt connections
+        run: |
+          for i in $(seq 1 30); do
+            (echo > /dev/tcp/localhost/7688) >/dev/null 2>&1 && exit 0
+            sleep 2
+          done
+          echo "Memgraph did not become reachable in time" >&2
           exit 1
 
       - name: Run test suite (unit + integration + slow)
