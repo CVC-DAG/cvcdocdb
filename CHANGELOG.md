@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.6.0] - 2026-10-02
+
 ### Changed
 
 - **`JenaGraph` requires Apache Jena Fuseki >= 6.2.0** (`MIN_FUSEKI_VERSION`).
