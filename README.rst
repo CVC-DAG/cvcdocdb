@@ -11,7 +11,7 @@ CVCDocDB
 Features
 --------
 
-* **Two backends**: Full Neo4j integration (``Neo4jGraph``) or in-memory NetworkX (``NetworkXGraph``) for testing and tutorials
+* **Two backends**: Full Neo4j integration (``Neo4jGraph``, targeting Neo4j Community Edition; opt-in Enterprise-only features, see *Neo4j editions* below) or in-memory NetworkX (``NetworkXGraph``) for testing and tutorials
 * **WeakNode hierarchy**: Child entities with composite primary keys and automatic cascade delete through parent-child edges
 * **ON DELETE strategies**: CASCADE, RESTRICT, SET NULL -- choose the deletion semantics that fit your use case
 * **Semantic entities**: Domain-specific node types such as ``IndividuPadro``, ``LlocPadro``, and ``Fotografia``
@@ -179,6 +179,37 @@ Programmatic usage
     print(load_karate_club(graph))
     print(load_bibliografia_openalex(graph, query="graph database", per_page=15))
     graph.close()
+
+Neo4j editions: Community (default) and Enterprise
+--------------------------------------------------
+
+CVCDocDB targets **Neo4j Community Edition**. It is the edition the test suite
+and CI run on (``neo4j:5-community``), and ``Neo4jGraph`` uses it by default
+(``edition="community"``). Everything described above works on both Community
+and Enterprise.
+
+A few Neo4j **Enterprise-only** features are available as an opt-in mode
+(see ``cvcdocdb.neo4j_enterprise``)::
+
+    graph = Neo4jGraph(url, user, password, edition="enterprise")  # emits a UserWarning
+    graph.create_node_key_constraint("Document", ["doc"])           # NODE KEY
+    graph.create_property_existence_constraint("Document", "title") # IS NOT NULL
+    graph.create_property_type_constraint("Document", "year", "INTEGER")  # Neo4j 5.9+
+    graph.create_database("projecte1")                              # multiple databases
+    graph.drop_database("projecte1")
+
+In the default Community mode these methods raise ``EnterpriseFeatureError``
+without contacting the server. In Enterprise mode, every call also checks that
+the server really is Enterprise (``graph.server_edition()``).
+
+.. warning::
+
+   The Enterprise features require a valid **Neo4j Enterprise license** and
+   are **not fully tested**. The regular suite only checks the generated
+   Cypher and the Community-mode guards. The tests against a real Enterprise
+   server only run when ``NEO4J_ENTERPRISE_URL`` is set, and CI does not set
+   it. No constraint is created automatically. A ``NODE KEY`` on a label used
+   with several pk shapes rejects the nodes of the other shapes.
 
 Configuration
 -------------

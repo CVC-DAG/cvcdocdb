@@ -23,6 +23,14 @@ except ImportError:  # pragma: no cover - depèn de la versió del driver
         _DISABLED_NOTIFICATIONS_KEY = ""
 from neo4j.exceptions import ConstraintError, Forbidden, TransactionError
 from . import Node, Relation, WeakRelation
+from .neo4j_enterprise import (
+    COMMUNITY_EDITION,
+    ENTERPRISE_EDITION,
+    ENTERPRISE_WARNING,
+    EnterpriseFeatureError,
+    Neo4jEnterpriseMixin,
+    normalize_edition,
+)
 from typing import Any, Callable, Dict, Iterator, List, Optional, Set, Tuple, Union
 from tqdm import tqdm
 import re
@@ -251,7 +259,7 @@ def _apply_projection(doc: Dict[str, Any], projection: Dict[str, int]) -> Dict[s
     return {k: v for k, v in doc.items() if k not in projection}
 
 
-class Neo4jGraph:
+class Neo4jGraph(Neo4jEnterpriseMixin):
     """Neo4j-backed graph store for the DRM document representation model.
 
     This class wraps the Neo4j Python driver and provides high-level
@@ -259,12 +267,18 @@ class Neo4jGraph:
     validation, cascade delete strategies (CASCADE, RESTRICT, SET NULL),
     and WeakNode parent-child propagation.
 
+    cvcdocdb targets **Neo4j Community Edition** (the edition its test suite
+    and CI run on), and this is the default mode. Enterprise-only features
+    (NODE KEY / property existence / property type constraints, multiple
+    databases — see :mod:`cvcdocdb.neo4j_enterprise`) are disabled unless
+    ``edition="enterprise"`` is passed; they require a Neo4j Enterprise
+    license and are not fully tested.
+
     Example:
         >>> graph = Neo4jGraph(
         ...     url="bolt://localhost:7687",
         ...     user="neo4j",
         ...     password="secret",
-        ...     database="mydb",
         ... )
         >>> doc = Node(pk={"doc": "DOC-001"}, main_label="Document")
         >>> graph.insertNode(doc, replace=True)
@@ -275,11 +289,19 @@ class Neo4jGraph:
         user: Authentication username.
         password: Authentication password.
         database: Target database name. Defaults to the Neo4j default.
+            Community Edition has a single user database (``neo4j``).
         auto_pk_indexes: If True, after each commit (a standalone
             ``insertNode`` or a whole :meth:`batch`), create the pk indexes
             for any pk shape not indexed yet (:meth:`ensure_pk_indexes`).
             A failure (e.g. missing ``INDEX MANAGEMENT``) only warns — the
             data was already committed. Off by default.
+        edition: ``"community"`` (default) or ``"enterprise"``. In
+            Community mode the Enterprise-only methods raise
+            :class:`~cvcdocdb.neo4j_enterprise.EnterpriseFeatureError`
+            without contacting the server. ``"enterprise"`` enables them
+            (each call also checks that the server is Enterprise) and emits
+            a ``UserWarning``: they need an Enterprise license and are not
+            fully tested.
         **driver_config: Extra keyword arguments forwarded unchanged to
             ``neo4j.GraphDatabase.driver()`` — e.g.
             ``connection_timeout``/``connection_acquisition_timeout`` to
@@ -295,8 +317,13 @@ class Neo4jGraph:
         password: str,
         database: Optional[str] = None,
         auto_pk_indexes: bool = False,
+        edition: str = COMMUNITY_EDITION,
         **driver_config: Any,
     ) -> None:
+        self.edition = normalize_edition(edition)
+        if self.edition == ENTERPRISE_EDITION:
+            warnings.warn(ENTERPRISE_WARNING, UserWarning, stacklevel=2)
+        self._server_edition: Optional[str] = None
         self._driver = GraphDatabase.driver(url, auth=(user, password), **driver_config)
         self._auto_pk_indexes = auto_pk_indexes
         # Pk shapes (main_label, props) inserted through this instance, and
