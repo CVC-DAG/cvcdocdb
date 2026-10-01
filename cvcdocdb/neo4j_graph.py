@@ -1384,13 +1384,24 @@ class Neo4jGraph(Neo4jEnterpriseMixin):
     # ------------------------------------------------------------------
 
     def close(self) -> None:
-        if self._tx is not None:
-            if not self._tx.closed():
-                self._tx.close()
-            self._tx = None
-        self._closed = True
-        self._fk_index.clear()
-        self._driver.close()
+        """Close the open transaction (if any), the session and the driver.
+        Idempotent: closing an already closed graph does nothing."""
+        if self._closed:
+            return
+        try:
+            if self._tx is not None:
+                if not self._tx.closed():
+                    self._tx.close()
+                self._tx = None
+        finally:
+            self._closed = True
+            self._fk_index.clear()
+            # La sessió primer: si no, queda oberta fins que el recol·lector
+            # la destrueix, i el driver avisa (ResourceWarning/DeprecationWarning).
+            try:
+                self._session.close()
+            finally:
+                self._driver.close()
 
     def enable_vector_index(
         self, property_name: str, dimensions: int, space: str = "cosine", **kwargs
