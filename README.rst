@@ -11,10 +11,10 @@ CVCDocDB
 Features
 --------
 
-* **Two backends**: Full Neo4j integration (``Neo4jGraph``) or in-memory NetworkX (``NetworkXGraph``) for testing and tutorials
-* **WeakNode hierarchy**: Child entities with composite primary keys and automatic cascade delete through parent-child edges
+* **Two backends**: Full Neo4j integration (``Neo4jGraph``, targeting Neo4j Community Edition; opt-in Enterprise-only features, see *Neo4j editions* below) a Memgraph backend (``MemgraphGraph``, same propagation policy as Neo4j), an Apache Jena SPARQL backend (``JenaGraph``, RDF 1.2 in Fuseki), or in-memory NetworkX (``NetworkXGraph``) for testing and tutorials
+* **WeakNode hierarchy**: Child entities with composite primary keys and automatic cascade delete through parent-child edges. Inserting a WeakNode inserts all its ancestors. A chain has at most ``MAX_WEAK_CHAIN_DEPTH`` = 3 nodes (the root plus two levels, e.g. ``Document → Section → Page``). Deeper WeakNodes emit a ``WeakNodeDepthWarning``, and the next major version will give them an automatic surrogate key
 * **ON DELETE strategies**: CASCADE, RESTRICT, SET NULL -- choose the deletion semantics that fit your use case
-* **Semantic entities**: Domain-specific node types such as ``IndividuPadro``, ``LlocPadro``, and ``Fotografia``
+* **Semantic entities** (optional module, see below): Domain-specific node types such as ``IndividuPadro``, ``LlocPadro``, and ``Fotografia``
 * **FK validation**: Foreign key constraints on relations prevent dangling references
 * **Query and filtering**: Secondary index on scalar properties, multi-filter search with intersection/union, debug snapshots
 * **Vector search (NetworkX only)**: HNSW-based ANN indexing on node properties with ``cosine``, ``l2``, and ``ip`` distance spaces
@@ -35,7 +35,7 @@ Optional features are installed as extras, e.g. ``pip install "cvcdocdb[rdf,vect
 * ``schema`` -- entity-class generation from a YAML schema (``cvcdocdb.schema_gen``)
 * ``vector`` -- vector indexes on ``NetworkXGraph``
 * ``torch`` -- PyTorch / PyG data loaders (``cvcdocdb.torch_dataloader``)
-* ``graphrag`` -- ``Text2Cypher`` on a ``Neo4jGraph`` (Python >= 3.10)
+* ``graphrag`` -- ``Text2Cypher`` on a ``Neo4jGraph`` (Python >= 3.10). Not needed on ``MemgraphGraph`` or ``NetworkXGraph``
 
 Or install from source in development mode (``requirements.txt`` adds the
 documentation/notebook tools and some optional dependencies used for development)::
@@ -73,6 +73,30 @@ Quick Start
     print("Edges:", graph.get_edges())
     graph.close()
 
+Optional modules
+----------------
+
+The core (``Node``/``WeakNode``/``Relation``, ``GraphStore``, ``migrate()`` and
+the backends) is what ``import cvcdocdb`` loads. These modules build on it and
+are **optional**: they aren't imported by ``import cvcdocdb``, and some need an
+extra.
+
+* ``cvcdocdb.drm_entities`` (no extra) -- DRM semantic entities: ``IndividuPadro``, ``LlocPadro``, ``Fotografia``...
+* ``cvcdocdb.rico_entities`` (no extra) -- RiC-O archival entities generated from the ontology
+* ``cvcdocdb.rdf_schema`` (``[rdf]``) -- RDF/OWL ontology to YAML schema to entity classes
+* ``cvcdocdb.schema_gen`` (``[schema]``) -- Entity classes from a YAML schema
+* ``cvcdocdb.torch_dataloader`` (``[torch]``) -- Stream a graph into PyTorch / PyTorch Geometric
+* ``cvcdocdb.text2query`` (as the translator) -- Natural-language questions on any backend (SPARQL on Jena, Cypher elsewhere)
+* ``cvcdocdb.text2cypher`` (``[graphrag]``, on Neo4j only) -- Natural-language questions to Cypher
+* ``cvcdocdb.text2sparql`` (no extra) -- Natural-language questions to SPARQL (``JenaGraph``)
+
+::
+
+    from cvcdocdb.drm_entities import IndividuPadro   # not: from cvcdocdb import IndividuPadro
+
+``from cvcdocdb import IndividuPadro`` (and the other DRM entities) still works
+but emits a ``DeprecationWarning``; it will be removed in the next major version.
+
 Tutorial Notebooks
 ------------------
 
@@ -80,32 +104,31 @@ Runnable Jupyter notebooks in ``docs/tutorials/notebooks/``. Each notebook insta
 
 You can also view them rendered in the `hosted documentation <https://cvc-dag.github.io/cvcdocdb/>`_.
 
-Getting Started
-~~~~~~~~~~~~~~~
+General (any backend)
+~~~~~~~~~~~~~~~~~~~~~
+
+These use only the common ``GraphStore`` API, so they run unchanged on
+``NetworkXGraph``, ``Neo4jGraph`` and ``MemgraphGraph``:
 
 * ``intro_basics`` -- Minimal end-to-end workflow: insert nodes, create WeakNode hierarchies
 * ``querying_and_filtering`` -- Query operations: ``get_node()``, ``find_nodes()``, property filtering
-
-Interactive Demos
-~~~~~~~~~~~~~~~~~
-
 * ``weaknodes_interactive`` -- Build hierarchies with an interactive widget panel
-* ``vector_search`` -- HNSW vector indexing and nearest-neighbor search
 * ``delete_strategies`` -- Compare CASCADE, RESTRICT, SET NULL strategies
+* Datasets, each loaded into NetworkX and Neo4j: ``karate_club``, ``movies``, ``game_of_thrones``, ``bibliography_openalex``
 
-Datasets
-~~~~~~~~
+Backend-specific
+~~~~~~~~~~~~~~~~
 
-* ``karate_club`` -- Zachary Karate Club (34 members)
-* ``movies`` -- Movie-domain graph (actors, genres, films)
-* ``game_of_thrones`` -- Character-house graph
-* ``bibliography_openalex`` -- OpenAlex bibliographic references with citations
-* ``torch_dataloader_bibliography`` -- PyTorch/PyTorch Geometric dataloader, MetaPath2Vec training, and link prediction on the bibliographic dataset
+* **NetworkX**: ``vector_search`` -- HNSW vector indexing and nearest-neighbor search (``NetworkXGraph`` only)
+* **Neo4j**: ``propagation_demo`` -- full propagation workflow on a real Neo4j database (also as a script: ``python -m cvcdocdb.exemples.demo_propagation``)
+* **Memgraph**: no specific notebook; every general one runs on ``MemgraphGraph`` as is
 
-Ontologies
-~~~~~~~~~~
+Optional modules
+~~~~~~~~~~~~~~~~
 
-* ``generating_classes_from_owl`` -- Generate Python entity classes from RDF/OWL ontologies
+* ``cvcdocdb.rdf_schema`` / ``cvcdocdb.schema_gen``: ``generating_classes_from_owl`` -- Generate Python entity classes from RDF/OWL ontologies
+* ``cvcdocdb.rico_entities``: ``ric_o_demo`` (Neo4j) and ``ric_o_networkx_demo`` (NetworkX) -- the RiC-O model on each backend
+* ``cvcdocdb.torch_dataloader``: ``torch_dataloader_bibliography`` -- PyTorch/PyG dataloader, MetaPath2Vec training and link prediction
 
 RDF/OWL Ontology Conversion
 ---------------------------
@@ -179,6 +202,104 @@ Programmatic usage
     print(load_karate_club(graph))
     print(load_bibliografia_openalex(graph, query="graph database", per_page=15))
     graph.close()
+
+Memgraph backend
+----------------
+
+``MemgraphGraph`` stores the graph in `Memgraph <https://memgraph.com/>`_. It
+subclasses ``Neo4jGraph`` (Memgraph speaks Bolt and Cypher, and uses the same
+``neo4j`` driver), so the API and the **change-propagation policy** are
+identical to the Neo4j backend:
+
+* **Insert**: a WeakNode inserts its parent, and the parent→child edge
+  carries ``_propagate=TRUE``. A missing parent, child keys that don't match
+  the parent's, or a duplicate key are refused. Dependencies become ``Valor``
+  nodes.
+* **Update**: ``update=True`` merges attributes. ``replace=True`` deletes the
+  old node with propagation (its WeakNode descendants too) and recreates it.
+* **Delete**: RESTRICT by default, ``propagation=True`` for WeakNode
+  descendants, ``detach=True`` (CASCADE), or ``on_delete="set_null"``.
+* **Relations**: FK validation of both endpoints, plus ``update``/``replace``.
+
+.. code-block:: python
+
+    from cvcdocdb import MemgraphGraph
+
+    graph = MemgraphGraph("bolt://localhost:7687", "", "")  # no auth by default
+
+``test/test_memgraph_graph.py`` runs the same propagation scenarios on Neo4j
+and Memgraph and checks that both leave the same graph and raise the same
+errors. The only Memgraph-specific code is pk indexes (``SHOW INDEX INFO``,
+``CREATE INDEX ON :Label(props)``) and label/relationship-type listing for
+``schema_yaml()``. The Neo4j Enterprise features are not available on
+Memgraph (``EnterpriseFeatureError``), and neither is ``drop_constraint()``.
+Tested with Memgraph 3.13 (Community).
+
+Apache Jena backend (SPARQL)
+----------------------------
+
+``JenaGraph`` stores the graph as RDF 1.2 in `Apache Jena Fuseki <https://jena.apache.org/documentation/fuseki2/>`_
+(or another SPARQL 1.2 store), with the same API and behaviour as every other
+backend:
+
+.. code-block:: python
+
+    from cvcdocdb import JenaGraph, Node
+
+    graph = JenaGraph("http://localhost:3030/ds")          # a Fuseki dataset
+    graph.insertNode(Node(pk={"doc": "D1"}, main_label="Document", title="Padró"))
+    graph.query("PREFIX label: <urn:cvcdocdb:label/> PREFIX prop: <urn:cvcdocdb:prop/> "
+                "SELECT ?t WHERE { ?d a label:Document ; prop:title ?t }")   # [{'t': 'Padró'}]
+
+* **Same behaviour:** it reuses the ``NetworkXGraph`` logic, which is identical
+  to ``Neo4jGraph``'s, on an in-memory copy of the graph. The graph has to fit
+  in RAM.
+* **Atomic writes:** every mutating call, or a whole ``batch()``, is sent as
+  one atomic SPARQL Update with only what changed.
+* **Concurrent writes:** a version stamp detects writes from other clients
+  and raises ``ConcurrentModificationError``; nothing is applied.
+* **Querying:** ``query()`` runs SPARQL strings on the server. SPARQL Update is
+  refused, so writes always go through the API. Dict filters and Cypher run
+  on the copy.
+* **RDF layout:** nodes are ``<urn:cvcdocdb:node/ID>``, with ``a label:…`` and
+  ``prop:…`` values. Relationships are ``rel:…`` triples, and their properties
+  are RDF 1.2 annotations (``?a rel:X ?b {| prop:p ?v |}``).
+* **Isolation:** ``namespace`` and ``graph_iri`` keep it apart from other data
+  in the dataset.
+* **Natural language:** ``Text2SPARQL``, or ``Text2Query`` for any backend.
+
+Tested with Apache Jena Fuseki 6.2.0. Vector indexes are not supported (as on Neo4j).
+
+Neo4j editions: Community (default) and Enterprise
+--------------------------------------------------
+
+CVCDocDB targets **Neo4j Community Edition**. It is the edition the test suite
+and CI run on (``neo4j:5-community``), and ``Neo4jGraph`` uses it by default
+(``edition="community"``). Everything described above works on both Community
+and Enterprise.
+
+A few Neo4j **Enterprise-only** features are available as an opt-in mode
+(see ``cvcdocdb.neo4j_enterprise``)::
+
+    graph = Neo4jGraph(url, user, password, edition="enterprise")  # emits a UserWarning
+    graph.create_node_key_constraint("Document", ["doc"])           # NODE KEY
+    graph.create_property_existence_constraint("Document", "title") # IS NOT NULL
+    graph.create_property_type_constraint("Document", "year", "INTEGER")  # Neo4j 5.9+
+    graph.create_database("projecte1")                              # multiple databases
+    graph.drop_database("projecte1")
+
+In the default Community mode these methods raise ``EnterpriseFeatureError``
+without contacting the server. In Enterprise mode, every call also checks that
+the server really is Enterprise (``graph.server_edition()``).
+
+.. warning::
+
+   The Enterprise features require a valid **Neo4j Enterprise license** and
+   are **not fully tested**. The regular suite only checks the generated
+   Cypher and the Community-mode guards. The tests against a real Enterprise
+   server only run when ``NEO4J_ENTERPRISE_URL`` is set, and CI does not set
+   it. No constraint is created automatically. A ``NODE KEY`` on a label used
+   with several pk shapes rejects the nodes of the other shapes.
 
 Configuration
 -------------

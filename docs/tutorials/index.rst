@@ -1,11 +1,15 @@
 Tutorials and Examples
 ======================
 
-This section contains hands-on notebooks rendered directly in the docs.
+This section contains hands-on notebooks rendered directly in the docs. From
+every notebook page you can also open the notebook in Google Colab, Kaggle,
+or a local Jupyter server.
 
-Each dataset notebook shows how to load the same data into both
-``NetworkXGraph`` and ``Neo4jGraph``. From every notebook page you can also
-open the notebook in Google Colab, Kaggle, or a local Jupyter server.
+Tutorials and examples for the core of cvcdocdb. They use only the common
+``GraphStore`` API, so they work unchanged on every backend (``NetworkXGraph``,
+``Neo4jGraph``, ``MemgraphGraph``, ``JenaGraph``): most use ``NetworkXGraph``
+because it needs no server. Tutorials for the optional modules live with each module in
+:doc:`../optional/index`.
 
 Getting Started
 ---------------
@@ -18,96 +22,91 @@ Start here for a minimal end-to-end graph workflow:
    notebooks/getting_started/intro_basics
    notebooks/getting_started/querying_and_filtering
 
-Demos
------
+Core concepts
+-------------
 
-Interactive explorations with widgets, vector search, and advanced features:
+WeakNode hierarchies and deletion strategies:
 
 .. toctree::
    :maxdepth: 1
 
    notebooks/interactive/weaknodes
-   notebooks/demos/vector_search
    notebooks/demos/delete_strategies
-   notebooks/demos/propagation_demo
-   notebooks/demos/ric_o_demo
-   notebooks/demos/ric_o_networkx_demo
 
 Dataset Examples
 ----------------
 
-The tutorials below are grouped by dataset so you can compare how the same
-graph loads in the in-memory backend and in Neo4j.
-
-Karate Club
-~~~~~~~~~~~
-
-Classic social network benchmark from Zachary's karate club study. It has 34
-members and is commonly used for community detection examples.
+Each dataset notebook loads the same data into ``NetworkXGraph`` and
+``Neo4jGraph`` so you can compare them. The loaders in ``cvcdocdb.exemples``
+accept any backend, ``MemgraphGraph`` and ``JenaGraph`` included (the ``neo4j_*``/``networkx_*``
+module names are historical).
 
 .. toctree::
    :maxdepth: 1
 
    notebooks/datasets/karate_club
-
-Bibliographic references
-~~~~~~~~~~~~~~~~~~~~~~~~
-
-OpenAlex-based example with paper, author, and citation relationships. If
-network access is limited, the notebook falls back to a bundled sample so the
-example still runs.
-
-.. toctree::
-   :maxdepth: 1
-
    notebooks/datasets/bibliography_openalex
-
-PyTorch / PyTorch Geometric dataloader
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Streams the bibliographic dataset through ``cvcdocdb.torch_dataloader``
-(``GraphDataset``, ``SubgraphDataset``), trains node embeddings with
-``MetaPath2Vec`` on the heterogeneous Author/Paper graph, and runs a small
-link-prediction example.
-
-.. toctree::
-   :maxdepth: 1
-
-   notebooks/datasets/torch_dataloader_bibliography
-
-Movies
-~~~~~~
-
-Small movie-domain graph with movies, genres, and ``IN_GENRE`` relations.
-The loader uses a public sample API and ships with an offline fallback.
-
-.. toctree::
-   :maxdepth: 1
-
    notebooks/datasets/movies
-
-Game of Thrones
-~~~~~~~~~~~~~~~
-
-Character/house graph built from a public Thrones API. It also includes an
-offline fallback so the example remains usable without network access.
-
-.. toctree::
-   :maxdepth: 1
-
    notebooks/datasets/game_of_thrones
 
-Generating classes from OWL/RDF
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+- **Karate Club** -- Zachary's karate club social network (34 members).
+- **Bibliographic references** -- OpenAlex papers, authors and citations
+  (bundled offline sample if network access is limited).
+- **Movies** -- movies, genres and ``IN_GENRE`` relations (offline fallback).
+- **Game of Thrones** -- characters and houses (offline fallback).
 
-Generate Python entity classes from an RDF/OWL ontology (e.g. RiC-O).
-The pipeline downloads the ontology, converts it to DRM YAML, and generates
-``Node``, ``WeakNode``, ``Relation``, and ``WeakRelation`` subclasses.
+Backend-specific examples
+-------------------------
+
+Examples of features or workflows that are specific to one backend.
+
+NetworkX
+~~~~~~~~
+
+Vector (ANN) indexes are only available on ``NetworkXGraph``
+(``pip install "cvcdocdb[vector]"``):
 
 .. toctree::
    :maxdepth: 1
 
-   notebooks/datasets/generating_classes_from_owl
+   notebooks/demos/vector_search
+
+Neo4j
+~~~~~
+
+Full propagation workflow on a real Neo4j database: load data, generate the
+schema and entity classes, run ``init_propagation()`` and query. The same
+workflow as a script: ``python -m cvcdocdb.exemples.demo_propagation``.
+
+.. toctree::
+   :maxdepth: 1
+
+   notebooks/demos/propagation_demo
+
+Memgraph
+~~~~~~~~
+
+There is no Memgraph-specific example: ``MemgraphGraph`` has the same API and
+behaviour as ``Neo4jGraph``, so every general tutorial runs on it by creating
+the graph with ``MemgraphGraph(url, user, password)`` instead.
+
+Apache Jena
+~~~~~~~~~~~
+
+There is no Jena-specific notebook either: every general tutorial runs on
+``JenaGraph("http://localhost:3030/ds")``. On top of that, the data can be
+queried with SPARQL (see :doc:`../api/jena_graph`) and with
+:doc:`../optional/text2sparql`.
+
+Example scripts (``cvcdocdb.exemples``)
+---------------------------------------
+
+- Dataset loaders, for any backend: ``load_karate_club``,
+  ``load_bibliografia_openalex``, ``load_movies_sample``,
+  ``load_got_characters`` and (for :doc:`../optional/rico_entities`)
+  ``load_ric_o_naf``.
+- Command-line loader: ``python -m cvcdocdb.exemples --dataset karate --backend networkx``.
+- Neo4j only: ``python -m cvcdocdb.exemples.demo_propagation``.
 
 Notes
 -----

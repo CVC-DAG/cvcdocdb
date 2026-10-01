@@ -1,6 +1,20 @@
 PyTorch / PyTorch Geometric dataloader
 =======================================
 
+.. admonition:: Optional module
+
+   - **Install:** ``pip install "cvcdocdb[torch]"`` (``torch``, ``torch_geometric``).
+   - **Import:** ``from cvcdocdb.torch_dataloader import GraphDataset, GraphDataLoader, ...``
+
+
+Tutorials
+---------
+
+.. toctree::
+   :maxdepth: 1
+
+   ../tutorials/notebooks/datasets/torch_dataloader_bibliography
+
 :mod:`cvcdocdb.torch_dataloader` streams a :class:`~cvcdocdb.graph_store.GraphStore`
 graph into PyTorch/PyTorch Geometric tensors without materializing the whole
 graph in memory, for use with node embedding models (e.g. ``MetaPath2Vec``)

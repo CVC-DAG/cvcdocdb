@@ -7,6 +7,198 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Apache Jena backend: `JenaGraph`** (`cvcdocdb.jena_graph`, also
+  `from cvcdocdb import JenaGraph`). It stores the graph as RDF 1.2 in
+  Apache Jena Fuseki or another SPARQL 1.2 store, with the same API and
+  behaviour as every other backend: it reuses the `NetworkXGraph` logic
+  (identical to Neo4j's) on an in-memory copy of the graph.
+  - Every mutating call, or a whole `batch()`, is sent as one atomic SPARQL
+    Update with only the changes. A version stamp detects concurrent writers
+    and raises `ConcurrentModificationError`; nothing is applied.
+  - `query()` runs SPARQL on the server (SPARQL Update is refused), and dict
+    filters and Cypher on the copy.
+  - The RDF layout (`cvcdocdb.jena_rdf`) is queryable directly: label
+    classes, `prop:` values, `rel:` triples with RDF 1.2 annotations for
+    relationship properties. `namespace`/`graph_iri` isolate it from other
+    data, and `clear()` empties it. No extra dependency (HTTP via the
+    standard library, `cvcdocdb.sparql_client`).
+  - The graph has to fit in RAM, and vector indexes are not supported.
+  - Tested with Fuseki 6.2.0: the `GraphStore` contract suite, the
+    propagation contract, the 21 shared propagation scenarios (identical
+    results to NetworkX, hence to Neo4j), and migration to and from every
+    other backend. CI runs a Fuseki container, and `conftest.py` starts one
+    (port 3030) when none is reachable.
+- **`Text2SPARQL`** (`cvcdocdb.text2sparql`): natural-language questions
+  translated to SPARQL by an LLM, for `JenaGraph`, with the same API as
+  `Text2Cypher`. The schema is shown in the graph's RDF vocabulary with its
+  `PREFIX`es. Only read-only queries run (no update operation, no `SERVICE`).
+- **`Text2Query`** (`cvcdocdb.text2query`): one natural-language API for
+  every backend. It uses `Text2SPARQL` on `JenaGraph` and `Text2Cypher`
+  elsewhere, and returns a `Text2QueryResult` (`query`, `language`,
+  `records`). `Text2QueryError` is the new base of `Text2CypherError` and
+  `Text2SPARQLError`. `text2cypher.collect_schema()` exposes the backend-
+  independent schema collection.
+
+- **`GraphStore.set_node_properties(node_id, properties)`** (NetworkX, Neo4j,
+  Memgraph). Sets properties on an existing node verbatim
+  (`SET n += $props`), including keys that `Node()` can't carry. Raises
+  `KeyError` if the node doesn't exist.
+
+- **Memgraph backend: `MemgraphGraph`** (`cvcdocdb.memgraph_graph`, also
+  `from cvcdocdb import MemgraphGraph`). A subclass of `Neo4jGraph` (Memgraph
+  speaks Bolt and Cypher), so it has the same API and the same
+  change-propagation policy on insert (WeakNode parents, `_propagate` edges,
+  FK and key checks, dependencies), update (`update`/`replace`) and delete
+  (RESTRICT, propagation, CASCADE, SET NULL). Only pk indexes
+  (`SHOW INDEX INFO`, `CREATE INDEX ON :Label(props)`) and label and
+  relationship-type listing (`schema_yaml()`) use Memgraph-specific Cypher.
+  Neo4j Enterprise features and `drop_constraint()` are not available.
+  Tested with Memgraph 3.13 Community. `test/test_memgraph_graph.py` runs the
+  `GraphStore` contract suite on Memgraph, plus 20 propagation scenarios that
+  must leave the same graph and errors as on Neo4j. CI gets a Memgraph
+  service, and `conftest.py` starts a Memgraph container (port 7688) when
+  none is reachable.
+- `Neo4jGraph` gains four internal backend hooks, with no behaviour change:
+  `_existing_node_index_keys()`, `_pk_index_statement()`, `_list_labels()`
+  and `_list_relationship_types()`.
+
+- **Opt-in Neo4j Enterprise mode** (backward-compatible: the default is
+  unchanged). `Neo4jGraph(..., edition="community")` is the default, and
+  cvcdocdb keeps targeting and testing Neo4j Community Edition.
+  `edition="enterprise"` enables Enterprise-only operations (new module
+  `cvcdocdb.neo4j_enterprise`):
+  `create_node_key_constraint()`, `create_property_existence_constraint()`
+  (nodes or relationships), `create_property_type_constraint()` (Neo4j 5.9+),
+  `create_database()` and `drop_database()`. In Community mode they raise
+  `EnterpriseFeatureError` without contacting the server. In Enterprise mode,
+  each call checks `server_edition()` first, and the constructor emits a
+  `UserWarning`. These features require an Enterprise license and are not
+  fully tested: CI runs on Community only, and the real-server tests need
+  `NEO4J_ENTERPRISE_URL`. New, edition-independent helpers:
+  `server_edition()` and `drop_constraint()`.
+
+### Deprecated
+
+- **`cvcdocdb.drm_entities` is now an optional module.** `import cvcdocdb`
+  no longer imports it. Import the DRM entities from it:
+  `from cvcdocdb.drm_entities import IndividuPadro`. `from cvcdocdb import
+  IndividuPadro` (and `import *`) still works for every DRM entity name but
+  emits a `DeprecationWarning`; the top-level names will be removed in the
+  next major version. `Atribut` (the `Valor` node behind
+  `be_value_properties`) is part of the core and moves to `cvcdocdb.base`;
+  it's still importable from `cvcdocdb.drm_entities` and from `cvcdocdb`.
+
+- **WeakNode chains deeper than `MAX_WEAK_CHAIN_DEPTH` = 3 nodes** (the root
+  plus two levels of WeakNode). Creating a deeper WeakNode still works,
+  inheriting the composite key as before, but now emits a
+  `WeakNodeDepthWarning` (a `FutureWarning`, so it's shown by default). In
+  the next major version such nodes will get an automatic surrogate key
+  instead. `weak_chain_depth(node)` returns a node's depth.
+
+### Fixed
+
+- **Cypher write queries on `NetworkXGraph` were never saved.** They changed
+  the graph in memory only, unlike on Neo4j. They are now saved like any
+  other write. Their nodes now get `labels`/`pk`, are indexed (dict filters
+  find them), and no longer get an id that a later `insertNode()` could
+  reuse.
+
+- **`Text2Cypher` didn't work on `MemgraphGraph`.** It treated it as Neo4j:
+  `neo4j_graphrag`'s retriever fails on Memgraph (`CALL dbms.components()`
+  without `YIELD`), and so do `db.info()` and `db.schema.*`. Memgraph now
+  takes cvcdocdb's own path (write-clause check + `graph.query()`), with the
+  schema read with plain Cypher. It doesn't need `cvcdocdb[graphrag]`.
+- **The `Text2Cypher` schema is now the same text on every backend.**
+  NetworkX ignored alternative labels, and the property order on Neo4j
+  depended on `db.schema.*`. All backends now list every label, with
+  labels and properties in alphabetical order.
+  `test_schema_is_identical_on_every_backend` checks it on NetworkX, Neo4j
+  and Memgraph, and the portable Text2Cypher tests now run on Memgraph too.
+  `requirements-test.txt` now installs `neo4j-graphrag`, so CI runs the
+  Neo4j Text2Cypher tests, and `conftest.py` imports it before
+  `test_drm.py` mocks `neo4j`.
+- **`migrate()` now copies propagation properties on nodes.** `Node()`
+  reads `is_weak`/`_propagate`/`parent_relation` as structural arguments
+  and drops attributes starting with `_` (`_weak_init_done`), so:
+  - a NetworkX → NetworkX migration lost them;
+  - a NetworkX → Neo4j/Memgraph migration of a graph after
+    `init_propagation()` crashed (an `is_weak` node without a parent);
+  - from Neo4j they only survived by ending up in the fallback pk.
+  They are now written with `set_node_properties()` after each insert, and
+  never become part of the fallback pk.
+- **`migrate()` from a `MemgraphGraph` crashed** (`Explicit transaction
+  already open`): the batched read path only recognised the exact class
+  name `Neo4jGraph`. It now accepts any subclass.
+  `test/test_migration_propagation.py` migrates a graph with every
+  propagation property between all backend pairs, and checks that the
+  target ends up identical and behaves the same on a propagated delete.
+
+- **NetworkXGraph writes are now atomic, like a Neo4j transaction.** When a
+  mutating call or a whole `batch()` failed, nothing was saved to disk, but
+  the half-done changes stayed in memory, visible to later reads and saved
+  by the next write. The in-memory state is now rolled back to the last
+  saved one.
+- **`init_propagation()` and `create_group()` now set the documented
+  propagation properties, identically on every backend.**
+  - On Neo4j/Memgraph, `init_propagation()` never wrote `parent_relation`:
+    its loop iterated a result that had already been consumed. It's now set
+    on the child node, as documented.
+  - On NetworkX, `init_propagation()` didn't set `_weak_init_done`. It
+    wrote a wrong `_dependencies` (it counted WeakNode `HAS_*` edges as
+    dependencies) and skipped the property index. It now uses the same
+    algorithm as Neo4j, including its last step: any edge into an `is_weak`
+    node that has no `_propagate` yet gets `_propagate=True`. A propagated
+    delete from the edge's source therefore removes the WeakNode, as on
+    Neo4j.
+  - `create_group()` now initializes its WeakNode children (`is_weak`,
+    `_propagate`, `parent_relation`) like `init_propagation()` would, since
+    it marks the parent `_weak_init_done`. On NetworkX the parent edge also
+    gets `parent_relation`, as on Neo4j.
+  - `_dependencies` is no longer part of this contract: Neo4j can't store a
+    map as a property.
+  `test/test_propagation_contract.py` checks the contract on NetworkX, Neo4j
+  and Memgraph. The NetworkX-vs-Neo4j comparison now covers all 20 shared
+  scenarios.
+
+- **`NetworkXGraph.insertNode()` didn't insert a WeakNode's whole ancestry.**
+  With `Document → Section → Page`, `insertNode(page)` created Section and Page
+  but not Document (only the direct parent was inserted, without its own
+  parent edge). It now inserts every ancestor recursively, each with its
+  `_propagate` parent edge, as `Neo4jGraph` and `MemgraphGraph` do.
+- **`NetworkXGraph` now enforces the same WeakNode checks as Neo4j, before
+  writing anything.** A WeakNode whose parent is missing
+  (`insert_parent=False`) now raises `CVCDocDB Exception: missing parent
+  node ...` instead of a `ValueError` that left the child in the graph. A
+  child whose key doesn't reference its parent's key now raises
+  `RuntimeError` (Integrity Constraint Violated) instead of being accepted.
+  `test/test_weaknode_hierarchy.py` runs the shared propagation scenarios
+  (`test/propagation_scenarios.py`) on NetworkX and Neo4j and compares the
+  results.
+
+### Changed
+
+- CI: GitHub Actions bumped to their Node 24 releases (`checkout`/
+  `setup-python` v7, `upload-artifact` v7, `download-artifact` v8,
+  `upload-pages-artifact`/`deploy-pages` v5).
+
+### Documentation
+
+- **The documentation is split into a general part and optional modules.**
+  The general part covers the core API, the backends and the tutorials that
+  work on every backend. "Optional modules" has one page per module
+  (`drm_entities`, the new `rico_entities` page, `rdf_schema`, `schema_gen`,
+  `torch_dataloader`, `text2cypher`), each with its installation notes,
+  examples, own tutorials and API (moved from `docs/api/` to
+  `docs/optional/`). Backend-specific examples are grouped by backend
+  (NetworkX: vector search; Neo4j: propagation demo; Memgraph: none needed).
+  The README follows the same structure.
+
+- README, Sphinx docs and `test/README.md` now state explicitly that
+  cvcdocdb targets Neo4j Community Edition, and that the Enterprise features
+  need a license and are not fully tested.
+
 ## [1.4.0] - 2026-09-28
 
 ### Added

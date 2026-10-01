@@ -70,7 +70,7 @@ def migrate(
     ``list_vector_indexes``, ``enable_vector_index``), so it works
     between any two implementations in either direction. Nodes are read
     and written in chunks of *chunk_size* (batched over the network for
-    a ``Neo4jGraph`` source/target instead of one round-trip per node)
+    a ``Neo4jGraph``/``MemgraphGraph`` source instead of one round-trip per node)
     so migrating a graph with many nodes/edges doesn't require holding
     the whole thing in memory or paying a per-row round-trip.
 
@@ -84,10 +84,15 @@ def migrate(
     consequence is that a *repeated* migration run matches on the full
     property set instead of a smaller natural key.
 
-    Edges are cascade-delete-safe: their attributes (including
-    ``_propagate``) are copied as-is, so ``WeakNode``-style cascade
-    delete behaves the same on *target* even though migration itself
-    never constructs a ``WeakNode``.
+    **Propagation properties are copied as-is**, on edges (``_propagate``,
+    ``parent_relation``) and on nodes (``is_weak``, ``_propagate``,
+    ``parent_relation``, ``_weak_init_done``...), so ``WeakNode``-style
+    cascade delete and ``init_propagation()`` state behave the same on
+    *target*, even though migration itself never constructs a ``WeakNode``.
+    ``Node()`` can't carry those node properties (it reads them as
+    structural arguments, or drops them because they start with ``_``), so
+    they are written with ``target.set_node_properties()`` after the
+    insert. They are never part of the fallback pk described above.
 
     **Locking**: the whole migration — all three phases — runs under a
     single write lock held on *both* *source* and *target* for the
@@ -197,14 +202,18 @@ def migrate(
                     continue
 
                 try:
-                    main_label, pk, node_props = _split_node_attrs(attrs)
+                    main_label, pk, node_props, raw_props = _split_node_attrs(attrs)
                     node_labels = attrs.get("labels") or []
                     alt_labels = [l for l in node_labels if l != main_label] or None
-                    target.insertNode(
+                    new_id = target.insertNode(
                         Node(pk=pk, main_label=main_label,
                              alternative_labels=alt_labels, **node_props),
                         update=update, replace=replace,
                     )
+                    if raw_props:
+                        # Propietats que Node() no pot portar (de propagació):
+                        # s'escriuen tal qual al node acabat d'inserir.
+                        target.set_node_properties(new_id, raw_props)
                 except Exception as exc:  # noqa: BLE001 - re-raised unless on_error="skip"
                     if on_error == "raise":
                         raise
@@ -273,14 +282,33 @@ def migrate(
 # Helpers
 # ---------------------------------------------------------------------------
 
+#: Node properties that ``Node()`` can't carry as plain attributes: it reads
+#: them as structural arguments. Keys starting with ``_`` are dropped by
+#: ``Node.attributes`` too. These are written with ``set_node_properties()``.
+_NODE_STRUCTURAL_KWARGS = frozenset({
+    "is_weak", "parent_relation", "parent", "dependencies", "version", "neo4j_id", "alternative_labels",
+})
+
+
+def _is_raw_property(key: str) -> bool:
+    return key.startswith("_") or key in _NODE_STRUCTURAL_KWARGS
+
+
 def _split_node_attrs(
     attrs: Dict[str, Any],
-) -> Tuple[str, Dict[str, Any], Dict[str, Any]]:
-    """Split a ``get_node_attrs()`` dict into ``(main_label, pk, other_props)``.
+) -> Tuple[str, Dict[str, Any], Dict[str, Any], Dict[str, Any]]:
+    """Split a ``get_node_attrs()`` dict into
+    ``(main_label, pk, other_props, raw_props)``.
 
-    Falls back to using every remaining property as the pk when the
+    ``raw_props`` are the properties ``Node()`` can't carry (propagation
+    properties such as ``is_weak``, ``_propagate``, ``parent_relation``,
+    ``_weak_init_done``); ``migrate()`` writes them with
+    ``set_node_properties()``.
+
+    Falls back to using every remaining regular property as the pk when the
     source backend couldn't tell us which properties are the real one
-    (``attrs["pk"] is None`` — see the ``migrate()`` docstring).
+    (``attrs["pk"] is None`` — see the ``migrate()`` docstring). Propagation
+    properties are never part of that fallback pk.
     """
     main_label = attrs.get("main_label", "")
     pk = attrs.get("pk")
@@ -288,10 +316,21 @@ def _split_node_attrs(
         k: v for k, v in attrs.items()
         if k not in ("pk", "main_label", "labels")
     }
+    raw_props = {k: v for k, v in props.items() if _is_raw_property(k)}
+    props = {k: v for k, v in props.items() if not _is_raw_property(k)}
     if pk is None:
-        pk = dict(props)
-        props = {}
-    return main_label, pk, props
+        if props:
+            pk = dict(props)
+            props = {}
+        else:  # només propietats de propagació: no hi ha res més per identificar-lo
+            pk, raw_props = dict(raw_props), {}
+    return main_label, pk, props, raw_props
+
+
+def _is_bolt_store(store: GraphStore) -> bool:
+    """``Neo4jGraph`` or a subclass (``MemgraphGraph``), checked by class
+    name so this module doesn't import the neo4j backend."""
+    return any(cls.__name__ == "Neo4jGraph" for cls in type(store).__mro__)
 
 
 def _maybe_batch(store: GraphStore, write: bool = True):
@@ -321,7 +360,7 @@ def _iter_node_attrs(
     ``Neo4jGraph`` (via its public ``query()``); falls back to one
     ``get_node_attrs()`` call per id for any other backend.
     """
-    if type(source).__name__ == "Neo4jGraph" and node_ids:
+    if _is_bolt_store(source) and node_ids:
         rows = source.query(
             "MATCH (n) WHERE id(n) IN $ids "
             "RETURN id(n) AS nid, labels(n) AS labels, properties(n) AS props",
@@ -357,7 +396,7 @@ def _iter_edges_with_attrs(
     edge); falls back to ``get_edges()`` + ``get_edge_attrs()`` for any
     other backend.
     """
-    if type(source).__name__ == "Neo4jGraph":
+    if _is_bolt_store(source):
         offset = 0
         while True:
             rows = source.query(

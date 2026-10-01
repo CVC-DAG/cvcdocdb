@@ -28,6 +28,9 @@ Backends:
   on the graph's own driver and database (no Neo4j credentials passed
   again), which checks the query with ``EXPLAIN`` before running it.
   Requires the optional dependency: ``pip install cvcdocdb[graphrag]``.
+- ``MemgraphGraph`` — handled by cvcdocdb itself like the backends below
+  (``neo4j_graphrag``'s retriever doesn't work on Memgraph), with the schema
+  read with plain Cypher. No extra dependency.
 - Any other backend with a Cypher-capable ``query()`` (e.g.
   ``NetworkXGraph``) — handled by cvcdocdb itself, no extra dependency; the
   query is checked for write clauses and run with ``graph.query()``. On
@@ -49,6 +52,8 @@ __all__ = [
     "Text2Cypher",
     "Text2CypherError",
     "Text2CypherResult",
+    "Text2QueryError",
+    "collect_schema",
     "extract_cypher",
     "format_schema",
     "is_read_only_cypher",
@@ -77,6 +82,14 @@ Do not include triple backticks ``` or any additional text except the generated 
 
 Cypher query:
 """
+
+# (start label, type, end label) of every relationship, for the schema.
+_RELATIONSHIP_PATTERNS = (
+    "MATCH (a)-[r]->(b) "
+    "WITH DISTINCT labels(a) AS la, type(r) AS t, labels(b) AS lb "
+    "UNWIND la AS s UNWIND lb AS e "
+    "RETURN DISTINCT s AS start, t AS type, e AS end"
+)
 
 # Node attributes cvcdocdb keeps for its own bookkeeping, not user data.
 _INTERNAL_PROPERTIES = {"pk", "main_label", "labels"}
@@ -115,7 +128,12 @@ _TYPE_NAMES = {
 }
 
 
-class Text2CypherError(Exception):
+class Text2QueryError(Exception):
+    """Base class of the natural-language query errors (Text2Cypher,
+    Text2SPARQL, Text2Query): the LLM's answer could not be run."""
+
+
+class Text2CypherError(Text2QueryError):
     """The LLM's answer could not be run: invalid or non-read-only Cypher."""
 
 
@@ -251,8 +269,40 @@ def _add_prop(props: Dict[str, List[Tuple[str, str]]], owner: str, name: Any, ty
         entry.append((name, type_name))
 
 
+def collect_schema(
+    graph: Any,
+) -> Tuple[Dict[str, List[Tuple[str, str]]], Dict[str, List[Tuple[str, str]]], List[Tuple[str, str, str]]]:
+    """``(node_props, rel_props, relationships)`` of a graph, read through the
+    common ``GraphStore`` API (see :func:`format_schema` for their shape).
+    Every label of a node (main and alternative) is included, as on Neo4j."""
+    node_props: Dict[str, List[Tuple[str, str]]] = {}
+    labels: Dict[Any, List[str]] = {}
+    for nid in graph.get_node_ids():
+        attrs = graph.get_node_attrs(nid) or {}
+        node_labels = labels[nid] = list(attrs.get("labels") or [attrs.get("main_label", "Node")])
+        for label in node_labels:
+            node_props.setdefault(label, [])
+            for name, value in attrs.items():
+                if name not in _INTERNAL_PROPERTIES:
+                    _add_prop(node_props, label, name, _type_name(type(value).__name__))
+
+    rel_props: Dict[str, List[Tuple[str, str]]] = {}
+    patterns = set()
+    for u, v, rel_type in graph.get_edges():
+        for start in labels.get(u, ["Node"]):
+            for end in labels.get(v, ["Node"]):
+                patterns.add((start, rel_type, end))
+        rel_props.setdefault(rel_type, [])
+        for name, value in (graph.get_edge_attrs(u, v, rel_type) or {}).items():
+            _add_prop(rel_props, rel_type, name, _type_name(type(value).__name__))
+    rel_props = {k: v for k, v in rel_props.items() if v}
+    return _sorted(node_props), _sorted(rel_props), sorted(patterns)
+
+
 def _sorted(d: Dict[str, List[Tuple[str, str]]]) -> Dict[str, List[Tuple[str, str]]]:
-    return {k: d[k] for k in sorted(d)}
+    # Etiquetes i propietats en ordre alfabètic: el mateix text a tots els
+    # backends (db.schema.* de Neo4j no garanteix cap ordre).
+    return {k: sorted(d[k]) for k in sorted(d)}
 
 
 @dataclass
@@ -272,11 +322,20 @@ class Text2CypherResult:
 
 
 def _is_neo4j_graph(graph: Any) -> bool:
+    """A real Neo4j server (``Neo4jGraph``, but not ``MemgraphGraph``)."""
     try:
         from .neo4j_graph import Neo4jGraph
     except ImportError:  # pragma: no cover - neo4j driver not installed
         return False
-    return isinstance(graph, Neo4jGraph)
+    return isinstance(graph, Neo4jGraph) and not _is_memgraph_graph(graph)
+
+
+def _is_memgraph_graph(graph: Any) -> bool:
+    try:
+        from .memgraph_graph import MemgraphGraph
+    except ImportError:  # pragma: no cover - neo4j driver not installed
+        return False
+    return isinstance(graph, MemgraphGraph)
 
 
 class Text2Cypher:
@@ -284,11 +343,12 @@ class Text2Cypher:
 
     Unless *schema* is given, the graph schema shown to the LLM is
     introspected from the graph (on Neo4j with built-in ``db.schema.*``
-    procedures, so the APOC plugin is not needed). Properties starting with
-    ``_`` and cvcdocdb bookkeeping attributes are left out of it.
+    procedures, so the APOC plugin is not needed). It is the same text on
+    every backend for the same graph. Properties starting with ``_`` and
+    cvcdocdb bookkeeping attributes are left out of it.
 
     Args:
-        graph: The graph to query: a ``Neo4jGraph``, a ``NetworkXGraph``, or
+        graph: The graph to query: a ``Neo4jGraph``, a ``MemgraphGraph``, a ``NetworkXGraph``, or
             any backend whose ``query()`` accepts a Cypher string.
         llm: The LLM handle — a ``prompt: str -> str`` callable, or an object
             with ``invoke(prompt)`` returning an answer with ``.content``.
@@ -355,8 +415,16 @@ class Text2Cypher:
                 neo4j_database=self.database,
             )
         else:
+            # Memgraph: neo4j_graphrag no hi funciona (fa CALL dbms.components()
+            # sense YIELD), així que va pel camí genèric, amb l'esquema llegit
+            # amb Cypher pla (Memgraph no té db.schema.*).
             self.database = database
-            self.schema = schema if schema is not None else self._generic_schema()
+            if schema is not None:
+                self.schema = schema
+            elif _is_memgraph_graph(graph):
+                self.schema = self._memgraph_schema()
+            else:
+                self.schema = self._generic_schema()
 
     def query(self, question: str) -> Text2CypherResult:
         """Translate *question* to Cypher with the LLM, run it, return the rows.
@@ -391,25 +459,33 @@ class Text2Cypher:
         return Text2CypherResult(cypher=cypher, records=records, metadata={"cypher": cypher})
 
     def _generic_schema(self) -> str:
-        node_props: Dict[str, List[Tuple[str, str]]] = {}
-        labels: Dict[Any, str] = {}
-        for nid in self.graph.get_node_ids():
-            attrs = self.graph.get_node_attrs(nid) or {}
-            label = labels[nid] = attrs.get("main_label", "Node")
-            node_props.setdefault(label, [])
-            for name, value in attrs.items():
-                if name not in _INTERNAL_PROPERTIES:
-                    _add_prop(node_props, label, name, _type_name(type(value).__name__))
+        return format_schema(*collect_schema(self.graph))
+
+    def _memgraph_schema(self) -> str:
+        """Same schema text as on Neo4j, read with plain Cypher: the type of
+        each property comes from one sample value, like on NetworkX."""
+        node_props: Dict[str, List[Tuple[str, str]]] = {
+            label: [] for label in self.graph._list_labels()
+        }
+        for rec in self.graph.query(
+            "MATCH (n) UNWIND labels(n) AS label UNWIND keys(n) AS key "
+            "RETURN label, key, head(collect(n[key])) AS sample"
+        ):
+            _add_prop(node_props, rec["label"], rec["key"], _type_name(type(rec["sample"]).__name__))
 
         rel_props: Dict[str, List[Tuple[str, str]]] = {}
-        patterns = set()
-        for u, v, rel_type in self.graph.get_edges():
-            patterns.add((labels.get(u, "Node"), rel_type, labels.get(v, "Node")))
-            rel_props.setdefault(rel_type, [])
-            for name, value in (self.graph.get_edge_attrs(u, v, rel_type) or {}).items():
-                _add_prop(rel_props, rel_type, name, _type_name(type(value).__name__))
+        for rec in self.graph.query(
+            "MATCH ()-[r]->() UNWIND keys(r) AS key "
+            "RETURN type(r) AS rel_type, key, head(collect(r[key])) AS sample"
+        ):
+            _add_prop(rel_props, rec["rel_type"], rec["key"], _type_name(type(rec["sample"]).__name__))
         rel_props = {k: v for k, v in rel_props.items() if v}
-        return format_schema(_sorted(node_props), _sorted(rel_props), sorted(patterns))
+
+        relationships = sorted(
+            (rec["start"], rec["type"], rec["end"])
+            for rec in self.graph.query(_RELATIONSHIP_PATTERNS)
+        )
+        return format_schema(_sorted(node_props), _sorted(rel_props), relationships)
 
     # ------------------------------------------------------------------
     # Neo4j backend (neo4j_graphrag Text2CypherRetriever)
@@ -467,14 +543,7 @@ class Text2Cypher:
                       _type_name((rec["propertyTypes"] or [None])[0]))
         rel_props = {k: v for k, v in rel_props.items() if v}
 
-        relationships = [
-            (rec["start"], rec["type"], rec["end"])
-            for rec in self._run(
-                "MATCH (a)-[r]->(b) "
-                "WITH DISTINCT labels(a) AS la, type(r) AS t, labels(b) AS lb "
-                "UNWIND la AS s UNWIND lb AS e "
-                "RETURN DISTINCT s AS start, t AS type, e AS end "
-                "ORDER BY start, type, end"
-            )
-        ]
+        relationships = sorted(
+            (rec["start"], rec["type"], rec["end"]) for rec in self._run(_RELATIONSHIP_PATTERNS)
+        )
         return format_schema(_sorted(node_props), _sorted(rel_props), relationships)

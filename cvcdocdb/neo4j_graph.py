@@ -23,6 +23,14 @@ except ImportError:  # pragma: no cover - depèn de la versió del driver
         _DISABLED_NOTIFICATIONS_KEY = ""
 from neo4j.exceptions import ConstraintError, Forbidden, TransactionError
 from . import Node, Relation, WeakRelation
+from .neo4j_enterprise import (
+    COMMUNITY_EDITION,
+    ENTERPRISE_EDITION,
+    ENTERPRISE_WARNING,
+    EnterpriseFeatureError,
+    Neo4jEnterpriseMixin,
+    normalize_edition,
+)
 from typing import Any, Callable, Dict, Iterator, List, Optional, Set, Tuple, Union
 from tqdm import tqdm
 import re
@@ -251,7 +259,7 @@ def _apply_projection(doc: Dict[str, Any], projection: Dict[str, int]) -> Dict[s
     return {k: v for k, v in doc.items() if k not in projection}
 
 
-class Neo4jGraph:
+class Neo4jGraph(Neo4jEnterpriseMixin):
     """Neo4j-backed graph store for the DRM document representation model.
 
     This class wraps the Neo4j Python driver and provides high-level
@@ -259,12 +267,18 @@ class Neo4jGraph:
     validation, cascade delete strategies (CASCADE, RESTRICT, SET NULL),
     and WeakNode parent-child propagation.
 
+    cvcdocdb targets **Neo4j Community Edition** (the edition its test suite
+    and CI run on), and this is the default mode. Enterprise-only features
+    (NODE KEY / property existence / property type constraints, multiple
+    databases — see :mod:`cvcdocdb.neo4j_enterprise`) are disabled unless
+    ``edition="enterprise"`` is passed; they require a Neo4j Enterprise
+    license and are not fully tested.
+
     Example:
         >>> graph = Neo4jGraph(
         ...     url="bolt://localhost:7687",
         ...     user="neo4j",
         ...     password="secret",
-        ...     database="mydb",
         ... )
         >>> doc = Node(pk={"doc": "DOC-001"}, main_label="Document")
         >>> graph.insertNode(doc, replace=True)
@@ -275,11 +289,19 @@ class Neo4jGraph:
         user: Authentication username.
         password: Authentication password.
         database: Target database name. Defaults to the Neo4j default.
+            Community Edition has a single user database (``neo4j``).
         auto_pk_indexes: If True, after each commit (a standalone
             ``insertNode`` or a whole :meth:`batch`), create the pk indexes
             for any pk shape not indexed yet (:meth:`ensure_pk_indexes`).
             A failure (e.g. missing ``INDEX MANAGEMENT``) only warns — the
             data was already committed. Off by default.
+        edition: ``"community"`` (default) or ``"enterprise"``. In
+            Community mode the Enterprise-only methods raise
+            :class:`~cvcdocdb.neo4j_enterprise.EnterpriseFeatureError`
+            without contacting the server. ``"enterprise"`` enables them
+            (each call also checks that the server is Enterprise) and emits
+            a ``UserWarning``: they need an Enterprise license and are not
+            fully tested.
         **driver_config: Extra keyword arguments forwarded unchanged to
             ``neo4j.GraphDatabase.driver()`` — e.g.
             ``connection_timeout``/``connection_acquisition_timeout`` to
@@ -295,8 +317,13 @@ class Neo4jGraph:
         password: str,
         database: Optional[str] = None,
         auto_pk_indexes: bool = False,
+        edition: str = COMMUNITY_EDITION,
         **driver_config: Any,
     ) -> None:
+        self.edition = normalize_edition(edition)
+        if self.edition == ENTERPRISE_EDITION:
+            warnings.warn(ENTERPRISE_WARNING, UserWarning, stacklevel=2)
+        self._server_edition: Optional[str] = None
         self._driver = GraphDatabase.driver(url, auth=(user, password), **driver_config)
         self._auto_pk_indexes = auto_pk_indexes
         # Pk shapes (main_label, props) inserted through this instance, and
@@ -901,18 +928,11 @@ class Neo4jGraph:
             shapes = {(label, tuple(sorted(props))) for label, props in pk_shapes if props}
 
         try:
-            existing = {
-                (row["labelsOrTypes"][0], frozenset(row["properties"]))
-                for row in self._session.run(
-                    "SHOW INDEXES YIELD entityType, labelsOrTypes, properties "
-                    "WHERE entityType = 'NODE' AND labelsOrTypes IS NOT NULL AND size(labelsOrTypes) = 1 "
-                    "RETURN labelsOrTypes, properties"
-                )
-            }
+            existing = self._existing_node_index_keys()
             created: List[str] = []
             for label, props in sorted(shapes):
                 if (label, frozenset(props)) not in existing:
-                    name, statement = _pk_index_statement(label, props)
+                    name, statement = self._pk_index_statement(label, props)
                     self._session.run(statement).consume()
                     created.append(name)
                 self._indexed_pk_shapes.add((label, props))
@@ -921,6 +941,23 @@ class Neo4jGraph:
                 f"Creating pk indexes requires INDEX MANAGEMENT on the database: {exc.message}"
             ) from exc
         return created
+
+    def _existing_node_index_keys(self) -> Set[Tuple[str, frozenset]]:
+        """``(label, properties)`` of every single-label node index.
+        Backend hook (Memgraph has no ``SHOW INDEXES ... YIELD``)."""
+        return {
+            (row["labelsOrTypes"][0], frozenset(row["properties"]))
+            for row in self._session.run(
+                "SHOW INDEXES YIELD entityType, labelsOrTypes, properties "
+                "WHERE entityType = 'NODE' AND labelsOrTypes IS NOT NULL AND size(labelsOrTypes) = 1 "
+                "RETURN labelsOrTypes, properties"
+            )
+        }
+
+    @staticmethod
+    def _pk_index_statement(main_label: str, props: Tuple[str, ...]) -> Tuple[str, str]:
+        """``(index name, statement)`` for one pk shape. Backend hook."""
+        return _pk_index_statement(main_label, props)
 
     def _auto_index_new_pk_shapes(self) -> None:
         """``auto_pk_indexes``: index pk shapes seen since the last commit.
@@ -940,6 +977,22 @@ class Neo4jGraph:
             )
         # Don't retry the same shapes on every later commit.
         self._indexed_pk_shapes |= pending
+
+    def set_node_properties(self, node_id: int, properties: Dict[str, Any]) -> None:
+        """Set properties on an existing node verbatim (``SET n += $props``).
+        See :meth:`cvcdocdb.graph_store.GraphStore.set_node_properties`.
+
+        Raises:
+            KeyError: If no node has ``node_id``.
+        """
+        runner = self._tx if self._tx is not None else self._session
+        record = runner.run(
+            "MATCH (n) WHERE id(n) = $nid SET n += $props RETURN count(n) AS c",
+            nid=node_id,
+            props=dict(properties),
+        ).single()
+        if not record or record["c"] == 0:
+            raise KeyError(f"No node with id {node_id!r}")
 
     def get_edges(self) -> List[Tuple[int, int, str]]:
         """Return all edges as ``(src_id, dst_id, rel_type)`` tuples."""
@@ -1175,11 +1228,13 @@ class Neo4jGraph:
 
                     # Create the WeakRelation edge from strong_node to weak node
                     rel_type = wn.get("parent_relation", "HAS_CHILD")
+                    # Fill inicialitzat com ho faria init_propagation().
                     tx.run(
                         "MATCH (a) WHERE id(a) = $parent_id "
                         "MATCH (b) WHERE id(b) = $child_id "
                         "CREATE (a)-[r:" + rel_type + "]->(b) "
-                        "SET r._propagate = TRUE, r.parent_relation = $rel_type",
+                        "SET r._propagate = TRUE, r.parent_relation = $rel_type, "
+                        "b.is_weak = TRUE, b._propagate = TRUE, b.parent_relation = $rel_type",
                         parent_id=strong_node["neo4j_id"],
                         child_id=wn_result,
                         rel_type=rel_type,
@@ -1270,48 +1325,22 @@ class Neo4jGraph:
             )
             pending_strong_ids = {record["nid"] for record in result}
 
-            # Step 2: Mark all nodes that are children of a _propagate edge,
-            # but only if their parent is in the pending set.
+            # Step 2: Mark the children of a _propagate edge whose parent is
+            # pending as WeakNodes (is_weak, _propagate, parent_relation = the
+            # edge type, on the child node), then mark every pending node as
+            # processed. (Abans, parent_relation s'havia d'escriure a la
+            # relació en un bucle sobre un resultat ja consumit: no feia res.)
             if pending_strong_ids:
-                placeholders = ", ".join(f"$p{i}" for i in range(len(pending_strong_ids)))
-                query = (
-                    "MATCH (a)-[r]->(b) WHERE r._propagate = TRUE "
-                    f"AND id(a) IN [{placeholders}] "
-                    "RETURN DISTINCT id(b) AS child_id, id(a) AS parent_id"
-                )
-                child_result = session.run(
-                    query,
-                    **{f"p{i}": nid for i, nid in enumerate(pending_strong_ids)},
-                )
-                child_ids = {record["child_id"] for record in child_result}
-
-                for nid in child_ids:
-                    session.run(
-                        "MATCH (n) WHERE id(n) = $nid SET n.is_weak = TRUE, n._propagate = TRUE",
-                        nid=nid,
-                    )
-
-                # Also set parent_relation on the edges
-                for record in child_result:
-                    parent_id = record["parent_id"]
-                    child_id = record["child_id"]
-                    session.run(
-                        "MATCH (a)-[r]->(b) "
-                        "WHERE id(a) = $parent AND id(b) = $child "
-                        "AND r._propagate = TRUE "
-                        "SET r.parent_relation = type(r)",
-                        parent=parent_id,
-                        child=child_id,
-                    )
-
-                # Mark the parent as initialized
-                for nid in pending_strong_ids:
-                    session.run(
-                        "MATCH (n) WHERE id(n) = $nid SET n._weak_init_done = TRUE",
-                        nid=nid,
-                    )
-            else:
-                child_ids = set()
+                session.run(
+                    "MATCH (a)-[r]->(b) WHERE r._propagate = TRUE AND id(a) IN $ids "
+                    "SET b.is_weak = TRUE, b._propagate = TRUE, "
+                    "b.parent_relation = coalesce(b.parent_relation, type(r))",
+                    ids=list(pending_strong_ids),
+                ).consume()
+                session.run(
+                    "MATCH (n) WHERE id(n) IN $ids SET n._weak_init_done = TRUE",
+                    ids=list(pending_strong_ids),
+                ).consume()
 
             # Step 3: Mark all edges from WeakNodes that have _propagate
             # (for edges that weren't caught by the parent-child scan above)
@@ -1468,8 +1497,7 @@ class Neo4jGraph:
         session = self._session
         # Labels
         label_results = {}
-        for label_rec in session.run("CALL db.labels()"):
-            label = label_rec["label"]
+        for label in self._list_labels():
             count = session.run(
                 f"MATCH (n:`{label}`) RETURN count(n) AS c"
             ).single()["c"]
@@ -1485,8 +1513,7 @@ class Neo4jGraph:
 
         # Relationship types
         rel_results = {}
-        for rel_rec in session.run("CALL db.relationshipTypes()"):
-            rel_type = rel_rec["relationshipType"]
+        for rel_type in self._list_relationship_types():
             count = session.run(
                 f"MATCH ()-[r:`{rel_type}`]->() RETURN count(r) AS c"
             ).single()["c"]
@@ -1581,6 +1608,14 @@ class Neo4jGraph:
         lines.append("  {}")
 
         return "\n".join(lines) + "\n"
+
+    def _list_labels(self) -> List[str]:
+        """Every node label in the database. Backend hook."""
+        return [rec["label"] for rec in self._session.run("CALL db.labels()")]
+
+    def _list_relationship_types(self) -> List[str]:
+        """Every relationship type in the database. Backend hook."""
+        return [rec["relationshipType"] for rec in self._session.run("CALL db.relationshipTypes()")]
 
     def _python_type(self, value: Any) -> str:
         """Map a Neo4j value to a YAML/Python type string."""

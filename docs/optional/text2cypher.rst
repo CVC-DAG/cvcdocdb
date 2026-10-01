@@ -1,6 +1,17 @@
 Natural-language queries (Text2Cypher)
 ======================================
 
+.. tip::
+
+   On a ``JenaGraph`` use :doc:`text2sparql`, or :doc:`text2query` to pick
+   the right translator for any backend.
+
+.. admonition:: Optional module
+
+   - **Install:** only on ``Neo4jGraph``: ``pip install "cvcdocdb[graphrag]"`` (``neo4j-graphrag``, Python >= 3.10). Nothing extra on ``NetworkXGraph`` or ``MemgraphGraph``.
+   - **Import:** ``from cvcdocdb import Text2Cypher``
+
+
 :mod:`cvcdocdb.text2cypher` lets you ask questions in natural language to a
 cvcdocdb graph. An LLM translates the question to Cypher and the query is run
 on the graph. The API is the same for every backend, so a script doesn't
@@ -46,6 +57,12 @@ Backends
 
   :attr:`~cvcdocdb.text2cypher.Text2Cypher.retriever` exposes the underlying
   retriever, e.g. to plug it into a ``neo4j_graphrag`` ``GraphRAG`` pipeline.
+- ``MemgraphGraph`` — handled by cvcdocdb itself, with no extra dependency
+  (``neo4j_graphrag`` doesn't work with Memgraph: its retriever runs
+  ``CALL dbms.components()`` without ``YIELD``, which Memgraph rejects). The
+  query is checked for write clauses and run with ``graph.query(cypher)``,
+  and the schema is read with plain Cypher (Memgraph has no ``db.schema.*``).
+  ``retriever`` is ``None``.
 - ``NetworkXGraph`` (or any backend whose ``query()`` accepts Cypher) —
   handled by cvcdocdb itself, with no extra dependency; the query is run with
   ``graph.query(cypher)``. ``NetworkXGraph`` evaluates the common read-only
@@ -65,8 +82,10 @@ Notes
   checked for write clauses (``CREATE``, ``MERGE``, ``SET``, ``DELETE``...).
 - The schema shown to the LLM is introspected from the graph (on Neo4j with
   built-in ``db.schema.*`` procedures, so the APOC plugin is **not**
-  required). Properties starting with ``_`` and cvcdocdb bookkeeping
-  attributes are left out. Pass ``schema=...`` to provide your own schema
+  required). It is **the same text on every backend** for the same graph:
+  every label of a node (main and alternative), labels and properties in
+  alphabetical order. Properties starting with ``_`` and cvcdocdb
+  bookkeeping attributes are left out. Pass ``schema=...`` to provide your own schema
   text, ``examples=[...]`` for few-shot examples, or ``custom_prompt=...``
   (with ``{schema}``, ``{examples}`` and ``{query_text}`` placeholders) to
   replace the prompt.

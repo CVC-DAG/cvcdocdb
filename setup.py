@@ -60,7 +60,7 @@ setup(
     package_dir={"": "."},
     install_requires=INSTALL_REQUIRES,
     extras_require=EXTRAS_REQUIRE,
-    keywords=["document representation", "knowledge graph", "neo4j", "networkx", "document analysis"],
+    keywords=["document representation", "knowledge graph", "neo4j", "memgraph", "networkx", "sparql", "jena", "rdf", "document analysis"],
     classifiers=[
         "Development Status :: 4 - Beta",
         "Intended Audience :: Developers",
