@@ -566,7 +566,22 @@ class NetworkXGraph(GraphStore):
         """
         if isinstance(filter_dict, str):
             # Cypher-style query
-            return _execute_cypher(self, filter_dict, params or {})
+            from cvcdocdb.nx_cypher import is_write_query
+
+            if not is_write_query(filter_dict):
+                return _execute_cypher(self, filter_dict, params or {})
+            # Escriptura: es desa com qualsevol altra mutació (com a Neo4j), i
+            # els nodes creats queden com els d'insertNode.
+            with self._guarded_write():
+                before = set(self._node_attrs)
+                rows = _execute_cypher(self, filter_dict, params or {})
+                for node_id in set(self._node_attrs) - before:
+                    attrs = self._node_attrs[node_id]
+                    attrs.setdefault("labels", [attrs.get("main_label", "Node")])
+                    attrs.setdefault("pk", None)
+                    self._index_node(node_id, attrs)
+                self._node_counter = max([self._node_counter, *self._node_attrs])
+                return rows
 
         # MongoDB-style query
         if filter_dict is None:

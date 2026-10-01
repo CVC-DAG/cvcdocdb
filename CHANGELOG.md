@@ -67,6 +67,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Cypher write queries on `NetworkXGraph` were never saved.** They changed
+  the graph in memory only, unlike on Neo4j. They are now saved like any
+  other write. Their nodes now get `labels`/`pk`, are indexed (dict filters
+  find them), and no longer get an id that a later `insertNode()` could
+  reuse.
+
 - **`Text2Cypher` didn't work on `MemgraphGraph`.** It treated it as Neo4j:
   `neo4j_graphrag`'s retriever fails on Memgraph (`CALL dbms.components()`
   without `YIELD`), and so do `db.info()` and `db.schema.*`. Memgraph now
@@ -138,6 +144,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `test/test_weaknode_hierarchy.py` runs the shared propagation scenarios
   (`test/propagation_scenarios.py`) on NetworkX and Neo4j and compares the
   results.
+
+### Changed
+
+- CI: GitHub Actions bumped to their Node 24 releases (`checkout`/
+  `setup-python` v7, `upload-artifact` v7, `download-artifact` v8,
+  `upload-pages-artifact`/`deploy-pages` v5).
 
 ### Documentation
 

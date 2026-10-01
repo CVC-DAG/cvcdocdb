@@ -234,3 +234,31 @@ class NetworkXAtomicWritesTest(unittest.TestCase):
             self.graph.insertNode(Node(pk={"id": 1}, main_label="T"))
             self.graph.insertNode(Node(pk={"id": 2}, main_label="T"))
         self.assertEqual(len(self._reopened().get_node_ids()), 2)
+
+
+class NetworkXCypherWritesTest(unittest.TestCase):
+    """Les consultes Cypher d'escriptura es desen (com a Neo4j) i el node
+    creat queda com qualsevol altre (etiquetes, índex, comptador d'ids)."""
+
+    def setUp(self) -> None:
+        self.path = os.path.join(tempfile.mkdtemp(), "g.pkl")
+        self.graph = NetworkXGraph(persistence_path=self.path)
+
+    def test_cypher_create_is_persisted(self) -> None:
+        self.graph.query("CREATE (n:Note {text: 'hola'})")
+        reopened = NetworkXGraph(persistence_path=self.path)
+        self.assertEqual(reopened.query("MATCH (n:Note) RETURN n.text AS t"), [{"t": "hola"}])
+
+    def test_node_created_with_cypher_is_a_regular_node(self) -> None:
+        self.graph.query("CREATE (n:Note {text: 'hola'})")
+        (node_id,) = self.graph.get_node_ids()
+        attrs = self.graph.get_node_attrs(node_id)
+        self.assertEqual(attrs["labels"], ["Note"])
+        self.assertIn("pk", attrs)
+        self.assertEqual(self.graph.query({"main_label": "Note", "text": "hola"})[0]["node_id"], node_id)
+
+    def test_later_inserts_do_not_reuse_its_id(self) -> None:
+        self.graph.query("CREATE (n:Note {text: 'hola'})")
+        new_id = self.graph.insertNode(Node(pk={"id": 1}, main_label="T"))
+        self.assertEqual(len(set(self.graph.get_node_ids())), 2)
+        self.assertNotIn(new_id, [i for i in self.graph.get_node_ids() if self.graph.get_node_attrs(i)["main_label"] == "Note"])
