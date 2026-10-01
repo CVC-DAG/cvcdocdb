@@ -978,6 +978,22 @@ class Neo4jGraph(Neo4jEnterpriseMixin):
         # Don't retry the same shapes on every later commit.
         self._indexed_pk_shapes |= pending
 
+    def set_node_properties(self, node_id: int, properties: Dict[str, Any]) -> None:
+        """Set properties on an existing node verbatim (``SET n += $props``).
+        See :meth:`cvcdocdb.graph_store.GraphStore.set_node_properties`.
+
+        Raises:
+            KeyError: If no node has ``node_id``.
+        """
+        runner = self._tx if self._tx is not None else self._session
+        record = runner.run(
+            "MATCH (n) WHERE id(n) = $nid SET n += $props RETURN count(n) AS c",
+            nid=node_id,
+            props=dict(properties),
+        ).single()
+        if not record or record["c"] == 0:
+            raise KeyError(f"No node with id {node_id!r}")
+
     def get_edges(self) -> List[Tuple[int, int, str]]:
         """Return all edges as ``(src_id, dst_id, rel_type)`` tuples."""
         result = self._session.run(
@@ -1212,11 +1228,13 @@ class Neo4jGraph(Neo4jEnterpriseMixin):
 
                     # Create the WeakRelation edge from strong_node to weak node
                     rel_type = wn.get("parent_relation", "HAS_CHILD")
+                    # Fill inicialitzat com ho faria init_propagation().
                     tx.run(
                         "MATCH (a) WHERE id(a) = $parent_id "
                         "MATCH (b) WHERE id(b) = $child_id "
                         "CREATE (a)-[r:" + rel_type + "]->(b) "
-                        "SET r._propagate = TRUE, r.parent_relation = $rel_type",
+                        "SET r._propagate = TRUE, r.parent_relation = $rel_type, "
+                        "b.is_weak = TRUE, b._propagate = TRUE, b.parent_relation = $rel_type",
                         parent_id=strong_node["neo4j_id"],
                         child_id=wn_result,
                         rel_type=rel_type,
@@ -1307,48 +1325,22 @@ class Neo4jGraph(Neo4jEnterpriseMixin):
             )
             pending_strong_ids = {record["nid"] for record in result}
 
-            # Step 2: Mark all nodes that are children of a _propagate edge,
-            # but only if their parent is in the pending set.
+            # Step 2: Mark the children of a _propagate edge whose parent is
+            # pending as WeakNodes (is_weak, _propagate, parent_relation = the
+            # edge type, on the child node), then mark every pending node as
+            # processed. (Abans, parent_relation s'havia d'escriure a la
+            # relació en un bucle sobre un resultat ja consumit: no feia res.)
             if pending_strong_ids:
-                placeholders = ", ".join(f"$p{i}" for i in range(len(pending_strong_ids)))
-                query = (
-                    "MATCH (a)-[r]->(b) WHERE r._propagate = TRUE "
-                    f"AND id(a) IN [{placeholders}] "
-                    "RETURN DISTINCT id(b) AS child_id, id(a) AS parent_id"
-                )
-                child_result = session.run(
-                    query,
-                    **{f"p{i}": nid for i, nid in enumerate(pending_strong_ids)},
-                )
-                child_ids = {record["child_id"] for record in child_result}
-
-                for nid in child_ids:
-                    session.run(
-                        "MATCH (n) WHERE id(n) = $nid SET n.is_weak = TRUE, n._propagate = TRUE",
-                        nid=nid,
-                    )
-
-                # Also set parent_relation on the edges
-                for record in child_result:
-                    parent_id = record["parent_id"]
-                    child_id = record["child_id"]
-                    session.run(
-                        "MATCH (a)-[r]->(b) "
-                        "WHERE id(a) = $parent AND id(b) = $child "
-                        "AND r._propagate = TRUE "
-                        "SET r.parent_relation = type(r)",
-                        parent=parent_id,
-                        child=child_id,
-                    )
-
-                # Mark the parent as initialized
-                for nid in pending_strong_ids:
-                    session.run(
-                        "MATCH (n) WHERE id(n) = $nid SET n._weak_init_done = TRUE",
-                        nid=nid,
-                    )
-            else:
-                child_ids = set()
+                session.run(
+                    "MATCH (a)-[r]->(b) WHERE r._propagate = TRUE AND id(a) IN $ids "
+                    "SET b.is_weak = TRUE, b._propagate = TRUE, "
+                    "b.parent_relation = coalesce(b.parent_relation, type(r))",
+                    ids=list(pending_strong_ids),
+                ).consume()
+                session.run(
+                    "MATCH (n) WHERE id(n) IN $ids SET n._weak_init_done = TRUE",
+                    ids=list(pending_strong_ids),
+                ).consume()
 
             # Step 3: Mark all edges from WeakNodes that have _propagate
             # (for edges that weren't caught by the parent-child scan above)

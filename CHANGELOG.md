@@ -7,35 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Fixed
-
-- **`NetworkXGraph.insertNode()` didn't insert a WeakNode's whole ancestry.**
-  With `Document → Section → Page`, `insertNode(page)` created Section and Page
-  but not Document (only the direct parent was inserted, without its own
-  parent edge). It now inserts every ancestor recursively, each with its
-  `_propagate` parent edge, as `Neo4jGraph` and `MemgraphGraph` do.
-- **`NetworkXGraph` now enforces the same WeakNode checks as Neo4j, before
-  writing anything.** A WeakNode whose parent is missing
-  (`insert_parent=False`) now raises `CVCDocDB Exception: missing parent
-  node ...` instead of a `ValueError` that left the child in the graph. A
-  child whose key doesn't reference its parent's key now raises
-  `RuntimeError` (Integrity Constraint Violated) instead of being accepted.
-  `test/test_weaknode_hierarchy.py` runs the shared propagation scenarios
-  (`test/propagation_scenarios.py`) on NetworkX and Neo4j and compares the
-  results. Three known differences remain, unrelated to WeakNode
-  insert/update/delete: `batch()` doesn't roll back on NetworkX,
-  `create_group()` edge attributes differ, and `init_propagation()` differs.
-
-### Deprecated
-
-- **WeakNode chains deeper than `MAX_WEAK_CHAIN_DEPTH` = 3 nodes** (the root
-  plus two levels of WeakNode). Creating a deeper WeakNode still works,
-  inheriting the composite key as before, but now emits a
-  `WeakNodeDepthWarning` (a `FutureWarning`, so it's shown by default). In
-  the next major version such nodes will get an automatic surrogate key
-  instead. `weak_chain_depth(node)` returns a node's depth.
-
 ### Added
+
+- **`GraphStore.set_node_properties(node_id, properties)`** (NetworkX, Neo4j,
+  Memgraph). Sets properties on an existing node verbatim
+  (`SET n += $props`), including keys that `Node()` can't carry. Raises
+  `KeyError` if the node doesn't exist.
 
 - **Memgraph backend: `MemgraphGraph`** (`cvcdocdb.memgraph_graph`, also
   `from cvcdocdb import MemgraphGraph`). A subclass of `Neo4jGraph` (Memgraph
@@ -69,6 +46,89 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   fully tested: CI runs on Community only, and the real-server tests need
   `NEO4J_ENTERPRISE_URL`. New, edition-independent helpers:
   `server_edition()` and `drop_constraint()`.
+
+### Deprecated
+
+- **WeakNode chains deeper than `MAX_WEAK_CHAIN_DEPTH` = 3 nodes** (the root
+  plus two levels of WeakNode). Creating a deeper WeakNode still works,
+  inheriting the composite key as before, but now emits a
+  `WeakNodeDepthWarning` (a `FutureWarning`, so it's shown by default). In
+  the next major version such nodes will get an automatic surrogate key
+  instead. `weak_chain_depth(node)` returns a node's depth.
+
+### Fixed
+
+- **`Text2Cypher` didn't work on `MemgraphGraph`.** It treated it as Neo4j:
+  `neo4j_graphrag`'s retriever fails on Memgraph (`CALL dbms.components()`
+  without `YIELD`), and so do `db.info()` and `db.schema.*`. Memgraph now
+  takes cvcdocdb's own path (write-clause check + `graph.query()`), with the
+  schema read with plain Cypher. It doesn't need `cvcdocdb[graphrag]`.
+- **The `Text2Cypher` schema is now the same text on every backend.**
+  NetworkX ignored alternative labels, and the property order on Neo4j
+  depended on `db.schema.*`. All backends now list every label, with
+  labels and properties in alphabetical order.
+  `test_schema_is_identical_on_every_backend` checks it on NetworkX, Neo4j
+  and Memgraph, and the portable Text2Cypher tests now run on Memgraph too.
+  `requirements-test.txt` now installs `neo4j-graphrag`, so CI runs the
+  Neo4j Text2Cypher tests, and `conftest.py` imports it before
+  `test_drm.py` mocks `neo4j`.
+- **`migrate()` now copies propagation properties on nodes.** `Node()`
+  reads `is_weak`/`_propagate`/`parent_relation` as structural arguments
+  and drops attributes starting with `_` (`_weak_init_done`), so:
+  - a NetworkX → NetworkX migration lost them;
+  - a NetworkX → Neo4j/Memgraph migration of a graph after
+    `init_propagation()` crashed (an `is_weak` node without a parent);
+  - from Neo4j they only survived by ending up in the fallback pk.
+  They are now written with `set_node_properties()` after each insert, and
+  never become part of the fallback pk.
+- **`migrate()` from a `MemgraphGraph` crashed** (`Explicit transaction
+  already open`): the batched read path only recognised the exact class
+  name `Neo4jGraph`. It now accepts any subclass.
+  `test/test_migration_propagation.py` migrates a graph with every
+  propagation property between all backend pairs, and checks that the
+  target ends up identical and behaves the same on a propagated delete.
+
+- **NetworkXGraph writes are now atomic, like a Neo4j transaction.** When a
+  mutating call or a whole `batch()` failed, nothing was saved to disk, but
+  the half-done changes stayed in memory, visible to later reads and saved
+  by the next write. The in-memory state is now rolled back to the last
+  saved one.
+- **`init_propagation()` and `create_group()` now set the documented
+  propagation properties, identically on every backend.**
+  - On Neo4j/Memgraph, `init_propagation()` never wrote `parent_relation`:
+    its loop iterated a result that had already been consumed. It's now set
+    on the child node, as documented.
+  - On NetworkX, `init_propagation()` didn't set `_weak_init_done`. It
+    wrote a wrong `_dependencies` (it counted WeakNode `HAS_*` edges as
+    dependencies) and skipped the property index. It now uses the same
+    algorithm as Neo4j, including its last step: any edge into an `is_weak`
+    node that has no `_propagate` yet gets `_propagate=True`. A propagated
+    delete from the edge's source therefore removes the WeakNode, as on
+    Neo4j.
+  - `create_group()` now initializes its WeakNode children (`is_weak`,
+    `_propagate`, `parent_relation`) like `init_propagation()` would, since
+    it marks the parent `_weak_init_done`. On NetworkX the parent edge also
+    gets `parent_relation`, as on Neo4j.
+  - `_dependencies` is no longer part of this contract: Neo4j can't store a
+    map as a property.
+  `test/test_propagation_contract.py` checks the contract on NetworkX, Neo4j
+  and Memgraph. The NetworkX-vs-Neo4j comparison now covers all 20 shared
+  scenarios.
+
+- **`NetworkXGraph.insertNode()` didn't insert a WeakNode's whole ancestry.**
+  With `Document → Section → Page`, `insertNode(page)` created Section and Page
+  but not Document (only the direct parent was inserted, without its own
+  parent edge). It now inserts every ancestor recursively, each with its
+  `_propagate` parent edge, as `Neo4jGraph` and `MemgraphGraph` do.
+- **`NetworkXGraph` now enforces the same WeakNode checks as Neo4j, before
+  writing anything.** A WeakNode whose parent is missing
+  (`insert_parent=False`) now raises `CVCDocDB Exception: missing parent
+  node ...` instead of a `ValueError` that left the child in the graph. A
+  child whose key doesn't reference its parent's key now raises
+  `RuntimeError` (Integrity Constraint Violated) instead of being accepted.
+  `test/test_weaknode_hierarchy.py` runs the shared propagation scenarios
+  (`test/propagation_scenarios.py`) on NetworkX and Neo4j and compares the
+  results.
 
 ### Documentation
 

@@ -425,6 +425,27 @@ class GraphStore(ABC):
     # Propagation property initialization
     # ------------------------------------------------------------------
 
+    def set_node_properties(self, node_id: Any, properties: Dict[str, Any]) -> None:
+        """Set properties on an existing node verbatim, merging them into the
+        ones it has (like Cypher ``SET n += $props``).
+
+        Unlike passing them to :class:`~cvcdocdb.base.Node`, every key is
+        stored as given, including keys that ``Node()`` treats as structural
+        arguments (``is_weak``, ``parent_relation``...) or drops because they
+        start with ``_`` (``_propagate``, ``_weak_init_done``...). Used by
+        :func:`cvcdocdb.migration.migrate` to copy propagation properties.
+
+        Args:
+            node_id: The node's internal id (as returned by ``insertNode``).
+            properties: Properties to set.
+
+        Raises:
+            KeyError: If no node has ``node_id``.
+        """
+        raise NotImplementedError(
+            f"set_node_properties is not supported by {self.__class__.__name__}."
+        )
+
     def init_propagation(
         self,
         background: bool = False,
@@ -435,8 +456,12 @@ class GraphStore(ABC):
 
         This method inspects every node and edge, determines whether it
         participates in a WeakNode / WeakRelation hierarchy, and sets
-        the corresponding ``_propagate``, ``is_weak``, ``parent_relation``,
-        and ``_dependencies`` properties.
+        the corresponding properties. Every child of a ``_propagate`` edge
+        whose parent hasn't been processed yet gets ``is_weak``,
+        ``_propagate`` and ``parent_relation`` (the edge type). Every
+        processed node gets ``_weak_init_done``. Finally, any edge into an
+        ``is_weak`` node that has no ``_propagate`` yet gets
+        ``_propagate=True``. All backends behave identically.
 
         **Lazy + background approach**: the first call runs synchronously
         and marks the graph as initialized.  Subsequent calls return

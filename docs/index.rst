@@ -168,19 +168,30 @@ hierarchy) and **operational** (tracking initialization state).
 
 - ``_propagate`` (bool): marks **edges** that trigger cascade delete when the
   parent node is removed. Set automatically on WeakNode parent-child edges.
-- ``is_weak`` (bool): marks **child nodes** (WeakNodes) that are linked to
-  their parent by a ``_propagate`` edge. Use this to find all nodes that
-  will be cascade-deleted when their parent is removed.
+  ``init_propagation()`` also sets it on **any** edge into an ``is_weak``
+  node that doesn't carry the flag yet (an explicit ``_propagate=False`` is
+  kept). For example, after ``init_propagation()`` a ``CITES`` edge pointing
+  at a Section makes ``deleteNode(src, propagation=True)`` delete that
+  Section too.
+- ``is_weak`` and ``_propagate`` (bool) on **child nodes** (WeakNodes)
+  linked to their parent by a ``_propagate`` edge. Use them to find all the
+  nodes that will be cascade-deleted when their parent is removed. They are
+  set by ``init_propagation()`` and ``create_group()``, but not by
+  ``insertNode()``, which only marks the edge.
 
 **Operational properties** — track initialization state:
 
-- ``parent_relation`` (str): stores the edge type linking a parent to its
-  WeakNode child (e.g. ``"HAS_SECTION"``, ``"HAS_PAGE"``).
-- ``_dependencies`` (dict): tracks auto-inserted ``Valor`` nodes for string
-  properties.
-- ``_weak_init_done`` (bool): tracks whether a **strong node** (parent) has
-  been processed by ``init_propagation()``. Set automatically by
-  ``create_group()`` because the edges already carry ``_propagate=True``.
+- ``parent_relation`` (str) on **child nodes**: the type of the edge linking
+  the child to its parent (e.g. ``"HAS_SECTION"``, ``"HAS_PAGE"``). Set by
+  ``init_propagation()`` and ``create_group()``, which also stores it on
+  that edge.
+- ``_weak_init_done`` (bool): whether a node has been processed by
+  ``init_propagation()``, i.e. its WeakNode children are initialized. Set
+  on every node the scan processes, and on the strong node by
+  ``create_group()``.
+
+The same properties are set by every backend (``NetworkXGraph``,
+``Neo4jGraph`` and ``MemgraphGraph``; see ``test/test_propagation_contract.py``).
 
 Example:
 
@@ -207,13 +218,14 @@ Example:
     graph.insertNode(section, insert_parent=True)
 
     # The edge doc → section carries _propagate=True
-    # The section node carries is_weak=True
+    # (the section node isn't marked yet)
 
-    # After init_propagation():
+    graph.init_propagation()
     #   section.is_weak = True              (structural: it's a WeakNode)
     #   section._propagate = True           (structural: cascade-delete enabled)
     #   section.parent_relation = "HAS_SECTION" (operational: edge type)
-    #   doc._weak_init_done = True          (operational: parent initialized)
+    #   doc._weak_init_done = True          (operational: children initialized)
+    #   section._weak_init_done = True      (processed too: it has no children)
 
 **Key distinction** — ``is_weak`` vs ``_weak_init_done``:
 
@@ -229,8 +241,8 @@ Example:
 
     # After create_group(doc, [section, page]):
     doc._weak_init_done = True   # parent: "my children are initialized"
-    section.is_weak = True       # child: "I am a WeakNode"
-    page.is_weak = True          # child: "I am a WeakNode"
+    section.is_weak = True       # child: "I am a WeakNode" (+ _propagate, parent_relation)
+    page.is_weak = True          # child: "I am a WeakNode" (+ _propagate, parent_relation)
 
     # After init_propagation() on a pre-existing graph:
     section.is_weak = True       # child: "I was detected as a WeakNode"

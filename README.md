@@ -33,7 +33,7 @@ Optional features are installed as extras, e.g. `pip install "cvcdocdb[rdf,vecto
 | `schema` | Entity-class generation from a YAML schema (`cvcdocdb.schema_gen`) |
 | `vector` | Vector indexes on `NetworkXGraph` |
 | `torch` | PyTorch / PyG data loaders (`cvcdocdb.torch_dataloader`) |
-| `graphrag` | `Text2Cypher` on a `Neo4jGraph` (Python >= 3.10) |
+| `graphrag` | `Text2Cypher` on a `Neo4jGraph` (Python >= 3.10). Not needed on `MemgraphGraph` or `NetworkXGraph` |
 
 Or install from source in development mode (`requirements.txt` adds the
 documentation/notebook tools and some optional dependencies used for development):

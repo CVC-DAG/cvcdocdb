@@ -8,3 +8,5 @@ python-dotenv
 testcontainers
 pyyaml
 build
+# Text2Cypher on Neo4jGraph (cvcdocdb[graphrag]); without it those tests skip.
+neo4j-graphrag>=1.21,<2; python_version >= "3.10"

@@ -933,13 +933,15 @@ class NetworkXGraph(GraphStore):
                     for wr in weak_relations:
                         self.insertRelation(wr, update=False, replace=False)
 
-                # 4. Mark the strong node as having its weak children initialized.
-                #    The edges already carry _propagate=True from insertNode, so
-                #    init_propagation() will detect the weak nodes without issue.
-                strong_attrs = self._node_attrs.get(strong_id, {})
-                strong_attrs["_weak_init_done"] = True
-                self._node_attrs[strong_id] = strong_attrs
-                self._graph.nodes[strong_id]["_weak_init_done"] = True
+                # 4. Els fills queden inicialitzats com ho faria
+                #    init_propagation(), i el pare marcat com a processat.
+                for wn in weak_nodes or []:
+                    rel_type = wn["parent_relation"]
+                    self._set_node_properties(
+                        wn.neo4j_id, {"is_weak": True, "_propagate": True, "parent_relation": rel_type}
+                    )
+                    self._edge_attrs[(strong_id, wn.neo4j_id, rel_type)]["parent_relation"] = rel_type
+                self._set_node_properties(strong_id, {"_weak_init_done": True})
 
                 return strong_id
 
@@ -947,6 +949,28 @@ class NetworkXGraph(GraphStore):
                 # Rollback: restore snapshot
                 self._restore(snapshot)
                 raise
+
+    def set_node_properties(self, node_id: int, properties: Dict[str, Any]) -> None:
+        """Set properties on an existing node verbatim. See
+        :meth:`GraphStore.set_node_properties`."""
+        with self._guarded_write():
+            if node_id not in self._node_attrs:
+                raise KeyError(f"No node with id {node_id!r}")
+            self._set_node_properties(node_id, dict(properties))
+
+    def _set_node_properties(
+        self, node_id: int, props: Dict[str, Any], only_missing: Tuple[str, ...] = ()
+    ) -> None:
+        """Set node properties keeping the property index up to date.
+        Keys listed in ``only_missing`` are only set if the node lacks them."""
+        attrs = self._node_attrs[node_id]
+        updates = {k: v for k, v in props.items() if k not in only_missing or k not in attrs}
+        if all(attrs.get(k) == v and k in attrs for k, v in updates.items()):
+            return
+        self._deindex_node(node_id, attrs)
+        attrs.update(updates)
+        self._graph.nodes[node_id].update(updates)
+        self._index_node(node_id, attrs)
 
     def _get_group_nodes(self) -> Set[int]:
         """Return the set of node ids that belong to the current group
@@ -973,64 +997,33 @@ class NetworkXGraph(GraphStore):
 
         def _run():
             with self._guarded_write():
-                # Collect all node ids
-                all_ids = list(self._node_attrs.keys())
-                total = len(all_ids)
-
-                # First pass: identify weak nodes by scanning edges for _propagate
-                weak_node_ids: Set[int] = set()
-                node_parent_relation: Dict[int, str] = {}
-
-                for (u, v, key), edge_attrs in self._edge_attrs.items():
-                    if edge_attrs.get("_propagate"):
-                        weak_node_ids.add(v)
-                        node_parent_relation[v] = key
-
-                # Second pass: set properties on nodes
-                for idx, nid in enumerate(all_ids):
-                    attrs = self._node_attrs.get(nid, {})
-
-                    # Skip strong nodes whose weak children are already initialized.
-                    # _weak_init_done=True means create_group() created this node
-                    # together with its WeakNodes (edges carry _propagate=True).
-                    if attrs.get("_weak_init_done"):
-                        continue
-
-                    # Mark weak nodes
-                    if nid in weak_node_ids:
-                        if "is_weak" not in attrs:
-                            attrs["is_weak"] = True
-                            self._node_attrs[nid] = attrs
-                            self._graph.nodes[nid]["is_weak"] = True
-
-                        # Also set _propagate flag on the node
-                        if "_propagate" not in attrs:
-                            attrs["_propagate"] = True
-                            self._node_attrs[nid] = attrs
-                            self._graph.nodes[nid]["_propagate"] = True
-
-                    # Set parent_relation on weak nodes
-                    if nid in node_parent_relation and "parent_relation" not in attrs:
-                        attrs["parent_relation"] = node_parent_relation[nid]
-                        self._node_attrs[nid] = attrs
-                        self._graph.nodes[nid]["parent_relation"] = node_parent_relation[nid]
-
-                    # Check for dependency edges (HAS_*)
-                    deps = {}
-                    for (u2, v2, key2), edge_attrs2 in self._edge_attrs.items():
-                        if u2 == nid and key2.startswith("HAS_"):
-                            deps[key2[4:].lower()] = {
-                                "main_label": self._node_attrs.get(v2, {}).get("main_label", ""),
-                                "pk": self._node_attrs.get(v2, {}).get("pk", {}),
-                            }
-                    if deps and "_dependencies" not in attrs:
-                        attrs["_dependencies"] = deps
-                        self._node_attrs[nid] = attrs
-                        self._graph.nodes[nid]["_dependencies"] = deps
-
-                    # Progress callback
-                    if progress_callback and (idx % 100 == 0 or idx == total - 1):
-                        progress_callback(idx + 1, total)
+                # Mateix algorisme que Neo4jGraph.init_propagation():
+                # 1. nodes pendents: els que no tenen _weak_init_done;
+                pending = [nid for nid, attrs in self._node_attrs.items() if not attrs.get("_weak_init_done")]
+                pending_set = set(pending)
+                total = len(self._node_attrs)
+                # 2. els fills d'una relació _propagate d'un node pendent
+                #    queden marcats com a WeakNodes, amb el tipus de la relació;
+                for (src, dst, rel_type), edge_attrs in list(self._edge_attrs.items()):
+                    if edge_attrs.get("_propagate") and src in pending_set:
+                        self._set_node_properties(
+                            dst,
+                            {"is_weak": True, "_propagate": True, "parent_relation": rel_type},
+                            only_missing=("parent_relation",),
+                        )
+                # 3. i tots els nodes pendents queden processats.
+                for idx, nid in enumerate(pending):
+                    self._set_node_properties(nid, {"_weak_init_done": True})
+                    if progress_callback and (idx % 100 == 0 or idx == len(pending) - 1):
+                        progress_callback(idx + 1, len(pending))
+                # 4. Qualsevol relació sense _propagate que arribi a un node
+                #    is_weak passa a propagar (pas 3 de Neo4jGraph). Té efecte
+                #    en l'esborrat amb propagació des del node d'origen.
+                for (src, dst, rel_type), edge_attrs in self._edge_attrs.items():
+                    if self._node_attrs.get(dst, {}).get("is_weak") is True and edge_attrs.get("_propagate") is None:
+                        edge_attrs["_propagate"] = True
+                if progress_callback and not pending:
+                    progress_callback(total, total)
 
         if background:
             thread = threading.Thread(target=_run, daemon=True)
@@ -1572,7 +1565,9 @@ class NetworkXGraph(GraphStore):
         lock is still released (via ``finally``) but nothing is saved, so
         a failed multi-step operation (e.g. ``create_group()``'s rollback)
         leaves the on-disk state untouched rather than reflecting a
-        partial write.
+        partial write. The in-memory state is rolled back too
+        (:meth:`_discard_unsaved_changes`), so the failed operation isn't
+        visible to later reads either.
         """
         is_outermost = not self._file_lock.is_locked
         timeout = _WAIT_FOREVER if self._lock_timeout is None else self._lock_timeout
@@ -1587,11 +1582,42 @@ class NetworkXGraph(GraphStore):
         try:
             if is_outermost:
                 self._load_state()
-            yield
+            try:
+                yield
+            except BaseException:
+                if is_outermost:
+                    self._discard_unsaved_changes()
+                raise
             if is_outermost and save:
                 self._save_state()
         finally:
             self._file_lock.release()
+
+    def _discard_unsaved_changes(self) -> None:
+        """Roll the in-memory state back to the last saved one.
+
+        Called when the outermost :meth:`_guarded_write` block fails. That
+        block reloaded the on-disk state on entry and nothing has been saved
+        since, so the file *is* the pre-block state. Restoring it makes
+        every mutating call and every :meth:`batch` atomic, like a Neo4j
+        transaction, instead of leaving half of a failed operation in memory
+        (unsaved, but visible to later reads and saved by the next write).
+        """
+        if os.path.exists(self._persistence_path):
+            self._load_state()
+        else:
+            # Mai desat: l'estat anterior és el graf buit.
+            self._graph = nx.MultiDiGraph()
+            self._node_attrs = {}
+            self._edge_attrs = {}
+            self._node_counter = 0
+            self._fk_index = {}
+            self._pk_index = {}
+            self._property_index = {}
+            self._vector_indexes = {}
+            self._vector_index_meta = {}
+        # _node_pks no es desa: treu-hi els nodes que ja no existeixen.
+        self._node_pks = {nid: pk for nid, pk in self._node_pks.items() if nid in self._node_attrs}
 
     def _default_persistence_path(self) -> str:
         """Build a deterministic persistence path for the current workspace.
