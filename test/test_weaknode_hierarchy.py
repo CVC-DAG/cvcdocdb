@@ -139,18 +139,6 @@ class WeakChainDepthTest(unittest.TestCase):
         self.assertEqual(line["pk_attributes"], {"doc": "D1", "sec": 1, "page": 7, "line": 1})
 
 
-# Diferències conegudes entre backends, alienes a la inserció/actualització/
-# esborrat de WeakNodes (pendents de decidir quin comportament és el bo):
-_KNOWN_DIFFERENCES = {
-    # El batch() de NetworkX és un bloqueig, no una transacció: no desfà les
-    # escriptures si el bloc falla.
-    "scenario_failed_insert_inside_batch_rolls_back",
-    # Neo4jGraph.create_group() posa `parent_relation` a la relació pare→fill;
-    # NetworkXGraph.create_group() no.
-    "scenario_create_group_then_propagated_delete",
-    # init_propagation() té implementacions diferents a cada backend.
-    "scenario_init_propagation_marks_weak_edges",
-}
 
 
 def _fresh_neo4j() -> Any:
@@ -174,8 +162,6 @@ class NetworkXMatchesNeo4jTest(unittest.TestCase):
         if not os.environ.get("NEO4J_DEV_URL"):
             self.skipTest("Sense NEO4J_DEV_URL: no hi ha Neo4j per comparar")
         for scenario in ps.SCENARIOS:
-            if scenario.__name__ in _KNOWN_DIFFERENCES:
-                continue
             with self.subTest(scenario=scenario.__name__):
                 expected = ps.run_scenario(_fresh_neo4j, scenario, ignore=ps.REPRESENTATION_KEYS)
                 actual = ps.run_scenario(_fresh_networkx, scenario, ignore=ps.REPRESENTATION_KEYS)

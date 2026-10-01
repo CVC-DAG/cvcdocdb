@@ -435,8 +435,12 @@ class GraphStore(ABC):
 
         This method inspects every node and edge, determines whether it
         participates in a WeakNode / WeakRelation hierarchy, and sets
-        the corresponding ``_propagate``, ``is_weak``, ``parent_relation``,
-        and ``_dependencies`` properties.
+        the corresponding properties. Every child of a ``_propagate`` edge
+        whose parent hasn't been processed yet gets ``is_weak``,
+        ``_propagate`` and ``parent_relation`` (the edge type). Every
+        processed node gets ``_weak_init_done``. Finally, any edge into an
+        ``is_weak`` node that has no ``_propagate`` yet gets
+        ``_propagate=True``. All backends behave identically.
 
         **Lazy + background approach**: the first call runs synchronously
         and marks the graph as initialized.  Subsequent calls return

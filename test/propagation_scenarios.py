@@ -209,6 +209,21 @@ def scenario_init_propagation_marks_weak_edges(graph: Any) -> List[Outcome]:
     return [attempt(lambda: graph.init_propagation())]
 
 
+def scenario_init_propagation_marks_edges_into_weak_nodes(graph: Any) -> List[Outcome]:
+    """init_propagation() marca amb _propagate qualsevol relació sense el
+    flag que arribi a un node is_weak (pas 3 de Neo4jGraph), i per tant
+    l'esborrat amb propagació des d'un node que hi apunta s'emporta el fill."""
+    _, sec, page = document_tree()
+    graph.insertNode(page)
+    reader = Node(pk={"id": 1}, main_label="Reader")
+    graph.insertNode(reader)
+    graph.insertRelation(Relation(reader, sec, "CITES"))
+    return [
+        attempt(lambda: graph.init_propagation()),
+        attempt(lambda: graph.deleteNode(reader, propagation=True, detach=True)),
+    ]
+
+
 SCENARIOS = [
     scenario_weak_chain_inserts_its_parents,
     scenario_weak_node_without_parent_is_refused,
@@ -230,6 +245,7 @@ SCENARIOS = [
     scenario_failed_insert_inside_batch_rolls_back,
     scenario_create_group_then_propagated_delete,
     scenario_init_propagation_marks_weak_edges,
+    scenario_init_propagation_marks_edges_into_weak_nodes,
 ]
 
 
