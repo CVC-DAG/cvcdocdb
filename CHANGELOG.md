@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`Neo4jGraph` no longer triggers the Neo4j driver's `PreviewWarning`**
+  (driver 5.x, the one installed on Python 3.9). To filter the `id()`
+  deprecation notices, cvcdocdb used the "classifications" notification API,
+  which is a preview feature in driver 5.x: it warned on import and on every
+  session. It now picks the stable API of each driver version: "categories"
+  on 5.x, and "classifications" on 6.x, where "categories" are deprecated.
+  The deprecation filter itself is unchanged.
+
 ### Changed
 
 - The PyPI summary now lists every backend: Neo4j, Memgraph, Apache Jena

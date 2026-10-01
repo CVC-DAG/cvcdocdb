@@ -9,18 +9,33 @@ from contextlib import contextmanager
 from neo4j import GraphDatabase
 
 # Enumeració per filtrar notificacions (veure _deprecation_filter_session_kwargs).
-# Importada aquí, al costat de GraphDatabase, perquè vingui sempre del mateix
-# lloc que el driver (també si un test el substitueix per un mock).
-try:  # neo4j driver >= 5.22 (les "categories" 5.x són obsoletes a la 6.x)
-    from neo4j import NotificationDisabledClassification as _DisabledNotification
-    _DISABLED_NOTIFICATIONS_KEY = "notifications_disabled_classifications"
-except ImportError:  # pragma: no cover - depèn de la versió del driver
+# Ve del mateix mòdul que GraphDatabase (també si un test el substitueix per un
+# mock). Es tria l'API ESTABLE de cada versió del driver: a la 5.x, les
+# "categories" (les "classifications" hi són en preview i el driver avisa amb
+# un PreviewWarning en importar-les i en cada sessió); a la 6.x, les
+# "classifications" (les "categories" hi són obsoletes).
+def _notification_filter_api() -> "Tuple[Any, str]":
+    import neo4j
+
     try:
-        from neo4j import NotificationDisabledCategory as _DisabledNotification
-        _DISABLED_NOTIFICATIONS_KEY = "notifications_disabled_categories"
-    except ImportError:  # driver anterior a la 5.7: sense filtres
-        _DisabledNotification = None
-        _DISABLED_NOTIFICATIONS_KEY = ""
+        major = int(str(neo4j.__version__).split(".")[0])
+    except (AttributeError, ValueError):  # driver de proves o versió desconeguda
+        major = 0
+    apis = [
+        ("NotificationDisabledCategory", "notifications_disabled_categories"),
+        ("NotificationDisabledClassification", "notifications_disabled_classifications"),
+    ]
+    if major >= 6:
+        apis.reverse()
+    for name, session_key in apis:
+        try:
+            return getattr(neo4j, name), session_key
+        except AttributeError:  # pragma: no cover - depèn de la versió del driver
+            continue
+    return None, ""  # driver anterior a la 5.7: sense filtres
+
+
+_DisabledNotification, _DISABLED_NOTIFICATIONS_KEY = _notification_filter_api()
 from neo4j.exceptions import ConstraintError, Forbidden, TransactionError
 from . import Node, Relation, WeakRelation
 from .neo4j_enterprise import (
