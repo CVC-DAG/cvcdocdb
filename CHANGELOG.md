@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- The PyPI summary now lists every backend: Neo4j, Memgraph, Apache Jena
+  (SPARQL) and NetworkX.
+
 ## [1.5.0] - 2026-10-01
 
 ### Added

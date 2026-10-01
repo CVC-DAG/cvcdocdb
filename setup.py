@@ -3,7 +3,7 @@ import os
 
 NAME = "cvcdocdb"
 VERSION = "0.0.0.dev0"  # real version numbers only live on `main` — see CLAUDE.md branch strategy
-DESCR = "Graph-based document representation library with Neo4j and NetworkX backends"
+DESCR = "Graph-based document representation library with Neo4j, Memgraph, Apache Jena (SPARQL) and NetworkX backends"
 URL = "https://github.com/CVC-DAG/cvcdocdb"
 AUTHOR = "Oriol Ramos Terrades"
 EMAIL = "oriolrt@cvc.uab.cat"
