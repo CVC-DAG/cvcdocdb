@@ -36,6 +36,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ("unclosed Session") and a `DeprecationWarning` (future drivers won't close
   sessions on destruction). `close()` is now idempotent.
 
+### Documentation
+
+- **New "Third-party software and licenses" section** in the README and the
+  docs. It explains that CVCDocDB (GPL-3.0-or-later) doesn't redistribute
+  any database server, and lists the license of each backend: Neo4j
+  Community GPL-3.0 and Enterprise commercial, Memgraph BSL 1.1 and MEL,
+  Apache Jena Fuseki Apache-2.0. It also lists the licenses of the Python
+  dependencies, and notes that the test Docker images aren't part of the
+  package.
+
 ## [1.5.0] - 2026-10-01
 
 ### Added
