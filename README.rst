@@ -12,7 +12,7 @@ Features
 --------
 
 * **Two backends**: Full Neo4j integration (``Neo4jGraph``, targeting Neo4j Community Edition; opt-in Enterprise-only features, see *Neo4j editions* below) a Memgraph backend (``MemgraphGraph``, same propagation policy as Neo4j), or in-memory NetworkX (``NetworkXGraph``) for testing and tutorials
-* **WeakNode hierarchy**: Child entities with composite primary keys and automatic cascade delete through parent-child edges
+* **WeakNode hierarchy**: Child entities with composite primary keys and automatic cascade delete through parent-child edges. Inserting a WeakNode inserts all its ancestors. A chain has at most ``MAX_WEAK_CHAIN_DEPTH`` = 3 nodes (the root plus two levels, e.g. ``Document → Section → Page``). Deeper WeakNodes emit a ``WeakNodeDepthWarning``, and the next major version will give them an automatic surrogate key
 * **ON DELETE strategies**: CASCADE, RESTRICT, SET NULL -- choose the deletion semantics that fit your use case
 * **Semantic entities**: Domain-specific node types such as ``IndividuPadro``, ``LlocPadro``, and ``Fotografia``
 * **FK validation**: Foreign key constraints on relations prevent dangling references

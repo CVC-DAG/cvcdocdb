@@ -6,10 +6,32 @@ optional alternative labels, and optional parent relationships for
 WeakNode hierarchies.  Relations connect two nodes with a typed edge.
 """
 
+import warnings
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 # Sentinel per distingir "pk no proporcionat" de "pk=None explícit"
 _UNSET = object()
+
+#: Maximum number of nodes in a WeakNode chain: the root plus two levels of
+#: WeakNodes (e.g. ``Document → Section → Page``). Deeper chains still work
+#: for now but emit a :class:`WeakNodeDepthWarning`; in the next major
+#: version the nodes beyond this depth get an automatic surrogate key.
+MAX_WEAK_CHAIN_DEPTH = 3
+
+
+class WeakNodeDepthWarning(FutureWarning):
+    """A WeakNode chain is deeper than :data:`MAX_WEAK_CHAIN_DEPTH`."""
+
+
+def weak_chain_depth(node: "Node") -> int:
+    """Number of nodes from the root of ``node``'s WeakNode chain down to
+    ``node`` itself (a root node has depth 1)."""
+    depth = 1
+    current = node._parent
+    while current is not None:
+        depth += 1
+        current = current._parent
+    return depth
 
 
 def _single_pk(pk: Dict[str, Union[int, str]], version: int = 5) -> Dict[str, Union[int, str]]:
@@ -196,6 +218,16 @@ class Node:
             self._parent_relation = (
                 parent_relation if parent_relation is not None else "HAS"
             )
+            depth = weak_chain_depth(self)
+            if depth > MAX_WEAK_CHAIN_DEPTH:
+                warnings.warn(
+                    f"WeakNode {self._main_label!r} is at depth {depth} of its WeakNode chain "
+                    f"(maximum {MAX_WEAK_CHAIN_DEPTH}: the root plus two levels). It still "
+                    "inherits its parent's composite key for now; in the next major version "
+                    "it will get an automatic surrogate key instead.",
+                    WeakNodeDepthWarning,
+                    stacklevel=3,
+                )
 
         dependencies = kwargs.pop("dependencies", False) or {}
 

@@ -36,7 +36,11 @@ Features
   in-memory ``NetworkXGraph`` (NetworkX) for testing and tutorials.
 - **Two entity levels**: Root entities (``Node``) and child entities
   (``WeakNode``) with composite primary keys and cascade delete
-  propagation.
+  propagation. Inserting a WeakNode inserts all its ancestors. A chain has
+  at most ``MAX_WEAK_CHAIN_DEPTH`` = 3 nodes (the root plus two levels, e.g.
+  ``Document → Section → Page``). Deeper WeakNodes emit a
+  ``WeakNodeDepthWarning``, and the next major version will give them an
+  automatic surrogate key.
 - **Dependency auto-insertion**: String properties (for example names) are
   automatically materialised as ``Valor`` nodes when the graph backend supports them.
 - **FK validation**: Foreign key constraints on relations prevent

@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`NetworkXGraph.insertNode()` didn't insert a WeakNode's whole ancestry.**
+  With `Document → Section → Page`, `insertNode(page)` created Section and Page
+  but not Document (only the direct parent was inserted, without its own
+  parent edge). It now inserts every ancestor recursively, each with its
+  `_propagate` parent edge, as `Neo4jGraph` and `MemgraphGraph` do.
+- **`NetworkXGraph` now enforces the same WeakNode checks as Neo4j, before
+  writing anything.** A WeakNode whose parent is missing
+  (`insert_parent=False`) now raises `CVCDocDB Exception: missing parent
+  node ...` instead of a `ValueError` that left the child in the graph. A
+  child whose key doesn't reference its parent's key now raises
+  `RuntimeError` (Integrity Constraint Violated) instead of being accepted.
+  `test/test_weaknode_hierarchy.py` runs the shared propagation scenarios
+  (`test/propagation_scenarios.py`) on NetworkX and Neo4j and compares the
+  results. Three known differences remain, unrelated to WeakNode
+  insert/update/delete: `batch()` doesn't roll back on NetworkX,
+  `create_group()` edge attributes differ, and `init_propagation()` differs.
+
+### Deprecated
+
+- **WeakNode chains deeper than `MAX_WEAK_CHAIN_DEPTH` = 3 nodes** (the root
+  plus two levels of WeakNode). Creating a deeper WeakNode still works,
+  inheriting the composite key as before, but now emits a
+  `WeakNodeDepthWarning` (a `FutureWarning`, so it's shown by default). In
+  the next major version such nodes will get an automatic surrogate key
+  instead. `weak_chain_depth(node)` returns a node's depth.
+
 ### Added
 
 - **Memgraph backend: `MemgraphGraph`** (`cvcdocdb.memgraph_graph`, also
