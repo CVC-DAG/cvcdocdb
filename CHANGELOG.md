@@ -7,7 +7,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`NetworkXGraph.insertNode()` didn't insert a WeakNode's whole ancestry.**
+  With `Document → Section → Page`, `insertNode(page)` created Section and Page
+  but not Document (only the direct parent was inserted, without its own
+  parent edge). It now inserts every ancestor recursively, each with its
+  `_propagate` parent edge, as `Neo4jGraph` and `MemgraphGraph` do.
+- **`NetworkXGraph` now enforces the same WeakNode checks as Neo4j, before
+  writing anything.** A WeakNode whose parent is missing
+  (`insert_parent=False`) now raises `CVCDocDB Exception: missing parent
+  node ...` instead of a `ValueError` that left the child in the graph. A
+  child whose key doesn't reference its parent's key now raises
+  `RuntimeError` (Integrity Constraint Violated) instead of being accepted.
+  `test/test_weaknode_hierarchy.py` runs the shared propagation scenarios
+  (`test/propagation_scenarios.py`) on NetworkX and Neo4j and compares the
+  results. Three known differences remain, unrelated to WeakNode
+  insert/update/delete: `batch()` doesn't roll back on NetworkX,
+  `create_group()` edge attributes differ, and `init_propagation()` differs.
+
+### Deprecated
+
+- **WeakNode chains deeper than `MAX_WEAK_CHAIN_DEPTH` = 3 nodes** (the root
+  plus two levels of WeakNode). Creating a deeper WeakNode still works,
+  inheriting the composite key as before, but now emits a
+  `WeakNodeDepthWarning` (a `FutureWarning`, so it's shown by default). In
+  the next major version such nodes will get an automatic surrogate key
+  instead. `weak_chain_depth(node)` returns a node's depth.
+
 ### Added
+
+- **Memgraph backend: `MemgraphGraph`** (`cvcdocdb.memgraph_graph`, also
+  `from cvcdocdb import MemgraphGraph`). A subclass of `Neo4jGraph` (Memgraph
+  speaks Bolt and Cypher), so it has the same API and the same
+  change-propagation policy on insert (WeakNode parents, `_propagate` edges,
+  FK and key checks, dependencies), update (`update`/`replace`) and delete
+  (RESTRICT, propagation, CASCADE, SET NULL). Only pk indexes
+  (`SHOW INDEX INFO`, `CREATE INDEX ON :Label(props)`) and label and
+  relationship-type listing (`schema_yaml()`) use Memgraph-specific Cypher.
+  Neo4j Enterprise features and `drop_constraint()` are not available.
+  Tested with Memgraph 3.13 Community. `test/test_memgraph_graph.py` runs the
+  `GraphStore` contract suite on Memgraph, plus 20 propagation scenarios that
+  must leave the same graph and errors as on Neo4j. CI gets a Memgraph
+  service, and `conftest.py` starts a Memgraph container (port 7688) when
+  none is reachable.
+- `Neo4jGraph` gains four internal backend hooks, with no behaviour change:
+  `_existing_node_index_keys()`, `_pk_index_statement()`, `_list_labels()`
+  and `_list_relationship_types()`.
 
 - **Opt-in Neo4j Enterprise mode** (backward-compatible: the default is
   unchanged). `Neo4jGraph(..., edition="community")` is the default, and

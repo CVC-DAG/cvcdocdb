@@ -14,7 +14,7 @@ from .graph_store import GraphLockTimeout, GraphStore
 def __getattr__(name):
     """Lazy import for optional backend modules.
 
-    Neo4jGraph and NetworkXGraph require optional dependencies (neo4j and
+    Neo4jGraph/MemgraphGraph and NetworkXGraph require optional dependencies (neo4j and
     networkx respectively) that may not be installed in all environments;
     Text2Cypher on a Neo4jGraph additionally needs ``neo4j-graphrag``
     (``cvcdocdb[graphrag]``).
@@ -23,6 +23,10 @@ def __getattr__(name):
         from .neo4j_graph import Neo4jGraph
 
         return Neo4jGraph
+    if name == "MemgraphGraph":
+        from .memgraph_graph import MemgraphGraph
+
+        return MemgraphGraph
     if name == "NetworkXGraph":
         from .networkx_graph import NetworkXGraph
 

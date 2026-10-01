@@ -8,8 +8,8 @@ Archives, libraries, and document collections are rarely flat files: documents h
 
 ## Features
 
-- **Two backends**: Full Neo4j integration (`Neo4jGraph`, targeting Neo4j Community Edition; opt-in Enterprise-only features, see [Neo4j editions](#neo4j-editions-community-default-and-enterprise)) or in-memory NetworkX (`NetworkXGraph`) for testing and tutorials
-- **WeakNode hierarchy**: Child entities with composite primary keys and automatic cascade delete through parent-child edges
+- **Two backends**: Full Neo4j integration (`Neo4jGraph`, targeting Neo4j Community Edition; opt-in Enterprise-only features, see [Neo4j editions](#neo4j-editions-community-default-and-enterprise)) a Memgraph backend (`MemgraphGraph`, same propagation policy as Neo4j), or in-memory NetworkX (`NetworkXGraph`) for testing and tutorials
+- **WeakNode hierarchy**: Child entities with composite primary keys and automatic cascade delete through parent-child edges. Inserting a WeakNode inserts all its ancestors. A chain has at most `MAX_WEAK_CHAIN_DEPTH` = 3 nodes (the root plus two levels, e.g. `Document → Section → Page`). Deeper WeakNodes emit a `WeakNodeDepthWarning`, and the next major version will give them an automatic surrogate key
 - **ON DELETE strategies**: CASCADE, RESTRICT, SET NULL -- choose the deletion semantics that fit your use case
 - **Semantic entities**: Domain-specific node types such as `IndividuPadro`, `LlocPadro`, and `Fotografia`
 - **FK validation**: Foreign key constraints on relations prevent dangling references
@@ -175,6 +175,37 @@ print(load_bibliografia_openalex(graph, query="graph database", per_page=15))
 graph.close()
 ```
 
+## Memgraph backend
+
+`MemgraphGraph` stores the graph in [Memgraph](https://memgraph.com/). It
+subclasses `Neo4jGraph` (Memgraph speaks Bolt and Cypher, and uses the same
+`neo4j` driver), so the API and the **change-propagation policy** are
+identical to the Neo4j backend:
+
+- **Insert**: a WeakNode inserts its parent, and the parent→child edge
+  carries `_propagate=TRUE`. A missing parent, child keys that don't match
+  the parent's, or a duplicate key are refused. Dependencies become `Valor`
+  nodes.
+- **Update**: `update=True` merges attributes. `replace=True` deletes the
+  old node with propagation (its WeakNode descendants too) and recreates it.
+- **Delete**: RESTRICT by default, `propagation=True` for WeakNode
+  descendants, `detach=True` (CASCADE), or `on_delete="set_null"`.
+- **Relations**: FK validation of both endpoints, plus `update`/`replace`.
+
+```python
+from cvcdocdb import MemgraphGraph
+
+graph = MemgraphGraph("bolt://localhost:7687", "", "")  # Memgraph has no auth by default
+```
+
+`test/test_memgraph_graph.py` runs the same propagation scenarios on Neo4j and
+Memgraph and checks that both leave the same graph and raise the same errors.
+The only Memgraph-specific code is pk indexes (`SHOW INDEX INFO`,
+`CREATE INDEX ON :Label(props)`) and label/relationship-type listing for
+`schema_yaml()`. The Neo4j Enterprise features are not available on Memgraph
+(`EnterpriseFeatureError`), and neither is `drop_constraint()`. Tested with
+Memgraph 3.13 (Community).
+
 ## Neo4j editions: Community (default) and Enterprise
 
 CVCDocDB targets **Neo4j Community Edition**. It is the edition the test suite
@@ -238,6 +269,10 @@ Three test levels:
   reachable and Docker is available, a disposable `neo4j:5-community`
   container is started automatically; otherwise these tests auto-skip.
   See `test/README.md` for details and the manual `docker-compose.neo4j.yml` option.
+- **Memgraph** (`-m slow`, `test/test_memgraph_graph.py`) -- requires a
+  Memgraph server at `MEMGRAPH_URL` (`MEMGRAPH_USER`/`MEMGRAPH_PASSWORD`). If
+  none is reachable and Docker is available, a disposable
+  `memgraph/memgraph:3.13.1` container is started on port 7688.
 
 Skip Neo4j tests: `pytest test/ -v -m "not slow"`
 

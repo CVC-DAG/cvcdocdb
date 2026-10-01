@@ -928,18 +928,11 @@ class Neo4jGraph(Neo4jEnterpriseMixin):
             shapes = {(label, tuple(sorted(props))) for label, props in pk_shapes if props}
 
         try:
-            existing = {
-                (row["labelsOrTypes"][0], frozenset(row["properties"]))
-                for row in self._session.run(
-                    "SHOW INDEXES YIELD entityType, labelsOrTypes, properties "
-                    "WHERE entityType = 'NODE' AND labelsOrTypes IS NOT NULL AND size(labelsOrTypes) = 1 "
-                    "RETURN labelsOrTypes, properties"
-                )
-            }
+            existing = self._existing_node_index_keys()
             created: List[str] = []
             for label, props in sorted(shapes):
                 if (label, frozenset(props)) not in existing:
-                    name, statement = _pk_index_statement(label, props)
+                    name, statement = self._pk_index_statement(label, props)
                     self._session.run(statement).consume()
                     created.append(name)
                 self._indexed_pk_shapes.add((label, props))
@@ -948,6 +941,23 @@ class Neo4jGraph(Neo4jEnterpriseMixin):
                 f"Creating pk indexes requires INDEX MANAGEMENT on the database: {exc.message}"
             ) from exc
         return created
+
+    def _existing_node_index_keys(self) -> Set[Tuple[str, frozenset]]:
+        """``(label, properties)`` of every single-label node index.
+        Backend hook (Memgraph has no ``SHOW INDEXES ... YIELD``)."""
+        return {
+            (row["labelsOrTypes"][0], frozenset(row["properties"]))
+            for row in self._session.run(
+                "SHOW INDEXES YIELD entityType, labelsOrTypes, properties "
+                "WHERE entityType = 'NODE' AND labelsOrTypes IS NOT NULL AND size(labelsOrTypes) = 1 "
+                "RETURN labelsOrTypes, properties"
+            )
+        }
+
+    @staticmethod
+    def _pk_index_statement(main_label: str, props: Tuple[str, ...]) -> Tuple[str, str]:
+        """``(index name, statement)`` for one pk shape. Backend hook."""
+        return _pk_index_statement(main_label, props)
 
     def _auto_index_new_pk_shapes(self) -> None:
         """``auto_pk_indexes``: index pk shapes seen since the last commit.
@@ -1495,8 +1505,7 @@ class Neo4jGraph(Neo4jEnterpriseMixin):
         session = self._session
         # Labels
         label_results = {}
-        for label_rec in session.run("CALL db.labels()"):
-            label = label_rec["label"]
+        for label in self._list_labels():
             count = session.run(
                 f"MATCH (n:`{label}`) RETURN count(n) AS c"
             ).single()["c"]
@@ -1512,8 +1521,7 @@ class Neo4jGraph(Neo4jEnterpriseMixin):
 
         # Relationship types
         rel_results = {}
-        for rel_rec in session.run("CALL db.relationshipTypes()"):
-            rel_type = rel_rec["relationshipType"]
+        for rel_type in self._list_relationship_types():
             count = session.run(
                 f"MATCH ()-[r:`{rel_type}`]->() RETURN count(r) AS c"
             ).single()["c"]
@@ -1608,6 +1616,14 @@ class Neo4jGraph(Neo4jEnterpriseMixin):
         lines.append("  {}")
 
         return "\n".join(lines) + "\n"
+
+    def _list_labels(self) -> List[str]:
+        """Every node label in the database. Backend hook."""
+        return [rec["label"] for rec in self._session.run("CALL db.labels()")]
+
+    def _list_relationship_types(self) -> List[str]:
+        """Every relationship type in the database. Backend hook."""
+        return [rec["relationshipType"] for rec in self._session.run("CALL db.relationshipTypes()")]
 
     def _python_type(self, value: Any) -> str:
         """Map a Neo4j value to a YAML/Python type string."""

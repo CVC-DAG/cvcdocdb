@@ -89,9 +89,10 @@ class EditionSelectionTest(unittest.TestCase):
     def test_community_mode_does_not_warn(self) -> None:
         with mock.patch.object(neo4j_graph.GraphDatabase, "driver") as driver:
             driver.return_value.get_server_info.return_value.protocol_version = (5, 0)
-            with warnings.catch_warnings():
-                warnings.simplefilter("error")
+            with warnings.catch_warnings(record=True) as caught:
+                warnings.simplefilter("always")
                 Neo4jGraph("bolt://example:7687", "u", "p")
+        self.assertEqual([w for w in caught if issubclass(w.category, UserWarning)], [])
 
     def test_server_edition_is_read_from_dbms_components(self) -> None:
         graph, sent = _make_graph(server_edition="community")

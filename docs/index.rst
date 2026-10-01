@@ -12,6 +12,7 @@ document representation with Neo4j and an in-memory NetworkX backend.
    api/base
    api/drm_entities
    api/graph_store
+   api/memgraph_graph
    api/migration
    api/neo4j_graph
    api/neo4j_enterprise
@@ -29,11 +30,17 @@ Features
   relations, including hierarchical structures such as Document → Section → Page.
 - **Two backends**: Full Neo4j integration via ``Neo4jGraph`` (targeting
   Neo4j Community Edition; opt-in Enterprise-only features, see
-  `Neo4j editions: Community (default) and Enterprise`_) or an
+  `Neo4j editions: Community (default) and Enterprise`_), a Memgraph
+  backend via ``MemgraphGraph`` (same propagation policy, see
+  `Memgraph backend`_), or an
   in-memory ``NetworkXGraph`` (NetworkX) for testing and tutorials.
 - **Two entity levels**: Root entities (``Node``) and child entities
   (``WeakNode``) with composite primary keys and cascade delete
-  propagation.
+  propagation. Inserting a WeakNode inserts all its ancestors. A chain has
+  at most ``MAX_WEAK_CHAIN_DEPTH`` = 3 nodes (the root plus two levels, e.g.
+  ``Document → Section → Page``). Deeper WeakNodes emit a
+  ``WeakNodeDepthWarning``, and the next major version will give them an
+  automatic surrogate key.
 - **Dependency auto-insertion**: String properties (for example names) are
   automatically materialised as ``Valor`` nodes when the graph backend supports them.
 - **FK validation**: Foreign key constraints on relations prevent
@@ -393,6 +400,38 @@ For the in-memory backend:
     graph.insertNode(doc)
     print(graph.get_node_ids())  # [1]
     graph.close()
+
+Memgraph backend
+----------------
+
+``MemgraphGraph`` stores the graph in `Memgraph <https://memgraph.com/>`_. It
+subclasses ``Neo4jGraph`` (Memgraph speaks Bolt and Cypher, and uses the same
+``neo4j`` driver), so the API and the **change-propagation policy** are
+identical to the Neo4j backend:
+
+- **Insert**: a WeakNode inserts its parent, and the parent→child edge
+  carries ``_propagate=TRUE``. A missing parent, child keys that don't match
+  the parent's, or a duplicate key are refused. Dependencies become ``Valor``
+  nodes.
+- **Update**: ``update=True`` merges attributes. ``replace=True`` deletes the
+  old node with propagation (its WeakNode descendants too) and recreates it.
+- **Delete**: RESTRICT by default, ``propagation=True`` for WeakNode
+  descendants, ``detach=True`` (CASCADE), or ``on_delete="set_null"``.
+- **Relations**: FK validation of both endpoints, plus ``update``/``replace``.
+
+.. code-block:: python
+
+    from cvcdocdb import MemgraphGraph
+
+    graph = MemgraphGraph("bolt://localhost:7687", "", "")  # no auth by default
+
+``test/test_memgraph_graph.py`` runs the same propagation scenarios on Neo4j
+and Memgraph and checks that both leave the same graph and raise the same
+errors. The only Memgraph-specific code is pk indexes (``SHOW INDEX INFO``,
+``CREATE INDEX ON :Label(props)``) and label/relationship-type listing for
+``schema_yaml()``. The Neo4j Enterprise features are not available on
+Memgraph (``EnterpriseFeatureError``; see :doc:`api/memgraph_graph`), and neither is ``drop_constraint()``.
+Tested with Memgraph 3.13 (Community).
 
 Neo4j editions: Community (default) and Enterprise
 --------------------------------------------------

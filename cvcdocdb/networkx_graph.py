@@ -108,11 +108,28 @@ class NetworkXGraph(GraphStore):
         Returns the internal node id assigned by the graph.
         """
         with self._guarded_write():
-            # Handle parent insertion for weak nodes
-            if node["is_weak"] and insert_parent and node["parent"] is not None:
+            # WeakNode: mateixa política que Neo4jGraph — s'insereixen tots
+            # els avantpassats (recursivament, cadascun amb la seva relació
+            # pare→fill), i abans d'escriure el fill es comprova que el pare
+            # existeixi i que les claus del fill referenciïn les del pare.
+            if node["is_weak"] and node["parent"] is not None:
                 parent = node["parent"]
-                parent_id: int = self._ensure_node_inserted(parent, update=True, replace=False)
+                if insert_parent:
+                    self.insertNode(parent, insert_parent=True, update=True, replace=False)
+                parent_id = self.checkNode(parent)
+                if parent_id is None:
+                    raise Exception(
+                        "CVCDocDB Exception: missing parent node  "
+                        + str(parent)
+                        + ". Insert it before "
+                        + str(node)
+                        + ". Node is weak:"
+                        + str(node["is_weak"])
+                        + ". Parent relation:"
+                        + str(node["parent_relation"])
+                    )
                 parent.neo4j_id = parent_id
+                self._check_child_references_parent_keys(node)
 
             node_id = self._ensure_node_inserted(node, update=update, replace=replace)
             node.neo4j_id = node_id
@@ -1201,6 +1218,22 @@ class NetworkXGraph(GraphStore):
     # ------------------------------------------------------------------
     # Protected helpers: node operations
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _check_child_references_parent_keys(node: Node) -> None:
+        """A WeakNode's key must contain its parent's key values (same check
+        as ``Neo4jGraph._insertNode``). Nodes with a backend-assigned
+        ``{"id": ...}`` key are exempt."""
+        child_pk = node["pk"]["pk"]
+        if isinstance(child_pk, dict) and len(child_pk) == 1 and "id" in child_pk:
+            return
+        parent_pk = node["parent"]["pk"]["pk"]
+        for key in parent_pk:
+            if parent_pk[key] != child_pk.get(key):
+                raise RuntimeError(
+                    "CVCDocDB Exception: Integrity Constraint Violated. "
+                    "Child node keys does not reference proper parent keys"
+                )
 
     def _ensure_node_inserted(
         self,
