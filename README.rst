@@ -374,6 +374,24 @@ CVCDocDB itself is licensed under the GNU General Public License v3 or later (se
      - ``JenaGraph``
      - Apache-2.0
 
+**About Memgraph's license.** Memgraph Community Edition is under the
+`Memgraph Business Source License 1.1 <https://github.com/memgraph/memgraph/blob/master/licenses/BSL.txt>`_.
+It lets you copy, modify and use Memgraph for non-production purposes, and,
+through its *Additional Use Grant*, in production **for your own internal
+purposes**. It does **not** allow you to:
+
+* embed or distribute Memgraph to third parties, or give third parties direct
+  access to operate or control it as a standalone solution or service;
+* offer it as a database-as-a-service (or any equivalent model);
+* build a product that competes with Memgraph.
+
+Using Memgraph with CVCDocDB inside your organisation (e.g. a research group's
+own projects and users) is therefore internal use. Offering Memgraph itself to
+third parties needs a commercial license from Memgraph. Each Memgraph version
+becomes Apache-2.0 on the license's Change Date, or four years after that
+version's first release, whichever comes first. Enterprise features (e.g.
+multi-tenancy) need a Memgraph Enterprise License.
+
 Python packages installed with CVCDocDB are under licenses compatible with the GPL-3.0:
 
 * ``neo4j`` (driver): Apache-2.0
