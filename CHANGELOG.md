@@ -30,6 +30,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     results to NetworkX, hence to Neo4j), and migration to and from every
     other backend. CI runs a Fuseki container, and `conftest.py` starts one
     (port 3030) when none is reachable.
+- **`Text2SPARQL`** (`cvcdocdb.text2sparql`): natural-language questions
+  translated to SPARQL by an LLM, for `JenaGraph`, with the same API as
+  `Text2Cypher`. The schema is shown in the graph's RDF vocabulary with its
+  `PREFIX`es. Only read-only queries run (no update operation, no `SERVICE`).
+- **`Text2Query`** (`cvcdocdb.text2query`): one natural-language API for
+  every backend. It uses `Text2SPARQL` on `JenaGraph` and `Text2Cypher`
+  elsewhere, and returns a `Text2QueryResult` (`query`, `language`,
+  `records`). `Text2QueryError` is the new base of `Text2CypherError` and
+  `Text2SPARQLError`. `text2cypher.collect_schema()` exposes the backend-
+  independent schema collection.
+
 - **`GraphStore.set_node_properties(node_id, properties)`** (NetworkX, Neo4j,
   Memgraph). Sets properties on an existing node verbatim
   (`SET n += $props`), including keys that `Node()` can't carry. Raises

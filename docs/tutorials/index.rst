@@ -95,7 +95,8 @@ Apache Jena
 
 There is no Jena-specific notebook either: every general tutorial runs on
 ``JenaGraph("http://localhost:3030/ds")``. On top of that, the data can be
-queried with SPARQL (see :doc:`../api/jena_graph`).
+queried with SPARQL (see :doc:`../api/jena_graph`) and with
+:doc:`../optional/text2sparql`.
 
 Example scripts (``cvcdocdb.exemples``)
 ---------------------------------------

@@ -86,7 +86,9 @@ extra.
 * ``cvcdocdb.rdf_schema`` (``[rdf]``) -- RDF/OWL ontology to YAML schema to entity classes
 * ``cvcdocdb.schema_gen`` (``[schema]``) -- Entity classes from a YAML schema
 * ``cvcdocdb.torch_dataloader`` (``[torch]``) -- Stream a graph into PyTorch / PyTorch Geometric
+* ``cvcdocdb.text2query`` (as the translator) -- Natural-language questions on any backend (SPARQL on Jena, Cypher elsewhere)
 * ``cvcdocdb.text2cypher`` (``[graphrag]``, on Neo4j only) -- Natural-language questions to Cypher
+* ``cvcdocdb.text2sparql`` (no extra) -- Natural-language questions to SPARQL (``JenaGraph``)
 
 ::
 
@@ -264,6 +266,7 @@ backend:
   are RDF 1.2 annotations (``?a rel:X ?b {| prop:p ?v |}``).
 * **Isolation:** ``namespace`` and ``graph_iri`` keep it apart from other data
   in the dataset.
+* **Natural language:** ``Text2SPARQL``, or ``Text2Query`` for any backend.
 
 Tested with Apache Jena Fuseki 6.2.0. Vector indexes are not supported (as on Neo4j).
 

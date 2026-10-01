@@ -37,7 +37,8 @@ How it works:
   a named graph. ``clear()`` deletes everything in the namespace.
 - Vector indexes are not supported (as on Neo4j).
 
-Tested with Apache Jena Fuseki 6.2.0.
+Tested with Apache Jena Fuseki 6.2.0. Natural-language questions:
+:doc:`../optional/text2sparql` or :doc:`../optional/text2query`.
 
 .. automodule:: cvcdocdb.jena_graph
    :members:

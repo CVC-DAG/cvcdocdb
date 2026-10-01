@@ -100,7 +100,8 @@ needs both.
 
 ### Apache Jena tests
 
-`test_jena_graph.py` (and the Jena parts of `test_migration_propagation.py`) need an Apache Jena Fuseki dataset with query and
+`test_jena_graph.py` (and the Jena parts of `test_migration_propagation.py`
+and `test_text2sparql.py`) need an Apache Jena Fuseki dataset with query and
 update at `FUSEKI_URL` (e.g. `http://localhost:3030/ds`). If nothing answers
 there and Docker plus `testcontainers` are available, `conftest.py` starts a
 disposable `secoresearch/fuseki:6.2.0` container on port 3030, with a clean
@@ -150,6 +151,7 @@ pytest test/test_neo4j_enterprise.py -m slow
 - `test_weaknode_hierarchy.py` — WeakNode ancestry on NetworkX, depth limit warning, NetworkX vs Neo4j propagation parity
 - `test_jena_rdf.py` — RDF layout of `JenaGraph` (no server)
 - `test_jena_graph.py` — Jena backend: contract suites, propagation parity with NetworkX, atomic/concurrent writes, SPARQL (needs `FUSEKI_URL`)
+- `test_text2sparql.py` — Text2SPARQL and Text2Query
 - `test_memgraph_graph.py` — Memgraph backend: contract tests, propagation policy, comparison with Neo4j
 - `test_neo4j_enterprise.py` — Community default / opt-in Enterprise mode (Enterprise server tests need `NEO4J_ENTERPRISE_URL`)
 

@@ -89,8 +89,9 @@ Features
   (``cvcdocdb.rdf_schema``, ``cvcdocdb.schema_gen``).
 - **PyTorch / PyTorch Geometric dataloader** (``cvcdocdb.torch_dataloader``):
   streams a graph into PyG-ready tensors without loading it all into memory.
-- **Text2Cypher** (``cvcdocdb.text2cypher``): natural-language questions
-  translated to Cypher by an LLM.
+- **Natural-language queries**: ``Text2Query`` on any backend, which uses
+  ``Text2SPARQL`` (``cvcdocdb.text2sparql``) on ``JenaGraph`` and
+  ``Text2Cypher`` (``cvcdocdb.text2cypher``) on the others.
 
 Primary Key
 -----------

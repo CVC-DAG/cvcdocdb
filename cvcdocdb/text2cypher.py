@@ -52,6 +52,8 @@ __all__ = [
     "Text2Cypher",
     "Text2CypherError",
     "Text2CypherResult",
+    "Text2QueryError",
+    "collect_schema",
     "extract_cypher",
     "format_schema",
     "is_read_only_cypher",
@@ -126,7 +128,12 @@ _TYPE_NAMES = {
 }
 
 
-class Text2CypherError(Exception):
+class Text2QueryError(Exception):
+    """Base class of the natural-language query errors (Text2Cypher,
+    Text2SPARQL, Text2Query): the LLM's answer could not be run."""
+
+
+class Text2CypherError(Text2QueryError):
     """The LLM's answer could not be run: invalid or non-read-only Cypher."""
 
 
@@ -260,6 +267,36 @@ def _add_prop(props: Dict[str, List[Tuple[str, str]]], owner: str, name: Any, ty
         return
     if all(p != name for p, _ in entry):
         entry.append((name, type_name))
+
+
+def collect_schema(
+    graph: Any,
+) -> Tuple[Dict[str, List[Tuple[str, str]]], Dict[str, List[Tuple[str, str]]], List[Tuple[str, str, str]]]:
+    """``(node_props, rel_props, relationships)`` of a graph, read through the
+    common ``GraphStore`` API (see :func:`format_schema` for their shape).
+    Every label of a node (main and alternative) is included, as on Neo4j."""
+    node_props: Dict[str, List[Tuple[str, str]]] = {}
+    labels: Dict[Any, List[str]] = {}
+    for nid in graph.get_node_ids():
+        attrs = graph.get_node_attrs(nid) or {}
+        node_labels = labels[nid] = list(attrs.get("labels") or [attrs.get("main_label", "Node")])
+        for label in node_labels:
+            node_props.setdefault(label, [])
+            for name, value in attrs.items():
+                if name not in _INTERNAL_PROPERTIES:
+                    _add_prop(node_props, label, name, _type_name(type(value).__name__))
+
+    rel_props: Dict[str, List[Tuple[str, str]]] = {}
+    patterns = set()
+    for u, v, rel_type in graph.get_edges():
+        for start in labels.get(u, ["Node"]):
+            for end in labels.get(v, ["Node"]):
+                patterns.add((start, rel_type, end))
+        rel_props.setdefault(rel_type, [])
+        for name, value in (graph.get_edge_attrs(u, v, rel_type) or {}).items():
+            _add_prop(rel_props, rel_type, name, _type_name(type(value).__name__))
+    rel_props = {k: v for k, v in rel_props.items() if v}
+    return _sorted(node_props), _sorted(rel_props), sorted(patterns)
 
 
 def _sorted(d: Dict[str, List[Tuple[str, str]]]) -> Dict[str, List[Tuple[str, str]]]:
@@ -422,29 +459,7 @@ class Text2Cypher:
         return Text2CypherResult(cypher=cypher, records=records, metadata={"cypher": cypher})
 
     def _generic_schema(self) -> str:
-        node_props: Dict[str, List[Tuple[str, str]]] = {}
-        labels: Dict[Any, List[str]] = {}
-        for nid in self.graph.get_node_ids():
-            attrs = self.graph.get_node_attrs(nid) or {}
-            # Totes les etiquetes del node (principal + alternatives), com Neo4j.
-            node_labels = labels[nid] = list(attrs.get("labels") or [attrs.get("main_label", "Node")])
-            for label in node_labels:
-                node_props.setdefault(label, [])
-                for name, value in attrs.items():
-                    if name not in _INTERNAL_PROPERTIES:
-                        _add_prop(node_props, label, name, _type_name(type(value).__name__))
-
-        rel_props: Dict[str, List[Tuple[str, str]]] = {}
-        patterns = set()
-        for u, v, rel_type in self.graph.get_edges():
-            for start in labels.get(u, ["Node"]):
-                for end in labels.get(v, ["Node"]):
-                    patterns.add((start, rel_type, end))
-            rel_props.setdefault(rel_type, [])
-            for name, value in (self.graph.get_edge_attrs(u, v, rel_type) or {}).items():
-                _add_prop(rel_props, rel_type, name, _type_name(type(value).__name__))
-        rel_props = {k: v for k, v in rel_props.items() if v}
-        return format_schema(_sorted(node_props), _sorted(rel_props), sorted(patterns))
+        return format_schema(*collect_schema(self.graph))
 
     def _memgraph_schema(self) -> str:
         """Same schema text as on Neo4j, read with plain Cypher: the type of

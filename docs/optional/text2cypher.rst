@@ -1,6 +1,11 @@
 Natural-language queries (Text2Cypher)
 ======================================
 
+.. tip::
+
+   On a ``JenaGraph`` use :doc:`text2sparql`, or :doc:`text2query` to pick
+   the right translator for any backend.
+
 .. admonition:: Optional module
 
    - **Install:** only on ``Neo4jGraph``: ``pip install "cvcdocdb[graphrag]"`` (``neo4j-graphrag``, Python >= 3.10). Nothing extra on ``NetworkXGraph`` or ``MemgraphGraph``.
