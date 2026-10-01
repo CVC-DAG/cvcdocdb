@@ -978,6 +978,22 @@ class Neo4jGraph(Neo4jEnterpriseMixin):
         # Don't retry the same shapes on every later commit.
         self._indexed_pk_shapes |= pending
 
+    def set_node_properties(self, node_id: int, properties: Dict[str, Any]) -> None:
+        """Set properties on an existing node verbatim (``SET n += $props``).
+        See :meth:`cvcdocdb.graph_store.GraphStore.set_node_properties`.
+
+        Raises:
+            KeyError: If no node has ``node_id``.
+        """
+        runner = self._tx if self._tx is not None else self._session
+        record = runner.run(
+            "MATCH (n) WHERE id(n) = $nid SET n += $props RETURN count(n) AS c",
+            nid=node_id,
+            props=dict(properties),
+        ).single()
+        if not record or record["c"] == 0:
+            raise KeyError(f"No node with id {node_id!r}")
+
     def get_edges(self) -> List[Tuple[int, int, str]]:
         """Return all edges as ``(src_id, dst_id, rel_type)`` tuples."""
         result = self._session.run(

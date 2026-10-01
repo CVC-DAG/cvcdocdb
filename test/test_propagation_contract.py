@@ -87,6 +87,23 @@ class PropagationContractChecks:
         self.assertIs(edges["CITES"].get("_propagate"), True)
         self.assertIs(edges["IGNORES"].get("_propagate"), False)
 
+    def test_set_node_properties_writes_any_property_verbatim(self) -> None:
+        node_id = self.graph.insertNode(Node(pk={"doc": "D1"}, main_label="Document", title="t"))
+        self.graph.set_node_properties(
+            node_id, {"is_weak": True, "_propagate": True, "parent_relation": "HAS_X", "_weak_init_done": True}
+        )
+        props = _nodes_by_label(self.graph)["Document"][0]
+        self.assertEqual(
+            {k: props.get(k) for k in ("doc", "title", "is_weak", "_propagate", "parent_relation", "_weak_init_done")},
+            {"doc": "D1", "title": "t", "is_weak": True, "_propagate": True,
+             "parent_relation": "HAS_X", "_weak_init_done": True},
+        )
+
+    def test_set_node_properties_on_a_missing_node_raises_key_error(self) -> None:
+        node_id = self.graph.insertNode(Node(pk={"doc": "D1"}, main_label="Document"))
+        with self.assertRaises(KeyError):
+            self.graph.set_node_properties(node_id + 1000, {"x": 1})
+
     def test_init_propagation_does_not_write_dependencies(self) -> None:
         _, _, page = ps.document_tree()
         self.graph.insertNode(page)

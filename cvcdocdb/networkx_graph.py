@@ -950,6 +950,14 @@ class NetworkXGraph(GraphStore):
                 self._restore(snapshot)
                 raise
 
+    def set_node_properties(self, node_id: int, properties: Dict[str, Any]) -> None:
+        """Set properties on an existing node verbatim. See
+        :meth:`GraphStore.set_node_properties`."""
+        with self._guarded_write():
+            if node_id not in self._node_attrs:
+                raise KeyError(f"No node with id {node_id!r}")
+            self._set_node_properties(node_id, dict(properties))
+
     def _set_node_properties(
         self, node_id: int, props: Dict[str, Any], only_missing: Tuple[str, ...] = ()
     ) -> None:

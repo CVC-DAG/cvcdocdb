@@ -135,6 +135,7 @@ pytest test/test_neo4j_enterprise.py -m slow
 - `test_create_graph.py` — Neo4j node/relation creation
 - `test_neo4j_real.py` — Real Neo4j workflow tests
 - `test_graph_store_contract.py::TestNeo4jGraph` — Contract tests
+- `test_migration_propagation.py` — `migrate()` keeps every propagation property, between all backend pairs
 - `test_propagation_contract.py` — propagation properties of `init_propagation()`/`create_group()` on every backend, NetworkX atomic writes
 - `test_weaknode_hierarchy.py` — WeakNode ancestry on NetworkX, depth limit warning, NetworkX vs Neo4j propagation parity
 - `test_memgraph_graph.py` — Memgraph backend: contract tests, propagation policy, comparison with Neo4j

@@ -425,6 +425,27 @@ class GraphStore(ABC):
     # Propagation property initialization
     # ------------------------------------------------------------------
 
+    def set_node_properties(self, node_id: Any, properties: Dict[str, Any]) -> None:
+        """Set properties on an existing node verbatim, merging them into the
+        ones it has (like Cypher ``SET n += $props``).
+
+        Unlike passing them to :class:`~cvcdocdb.base.Node`, every key is
+        stored as given, including keys that ``Node()`` treats as structural
+        arguments (``is_weak``, ``parent_relation``...) or drops because they
+        start with ``_`` (``_propagate``, ``_weak_init_done``...). Used by
+        :func:`cvcdocdb.migration.migrate` to copy propagation properties.
+
+        Args:
+            node_id: The node's internal id (as returned by ``insertNode``).
+            properties: Properties to set.
+
+        Raises:
+            KeyError: If no node has ``node_id``.
+        """
+        raise NotImplementedError(
+            f"set_node_properties is not supported by {self.__class__.__name__}."
+        )
+
     def init_propagation(
         self,
         background: bool = False,

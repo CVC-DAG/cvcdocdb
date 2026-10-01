@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`GraphStore.set_node_properties(node_id, properties)`** (NetworkX, Neo4j,
+  Memgraph). Sets properties on an existing node verbatim
+  (`SET n += $props`), including keys that `Node()` can't carry. Raises
+  `KeyError` if the node doesn't exist.
+
 - **Memgraph backend: `MemgraphGraph`** (`cvcdocdb.memgraph_graph`, also
   `from cvcdocdb import MemgraphGraph`). A subclass of `Neo4jGraph` (Memgraph
   speaks Bolt and Cypher), so it has the same API and the same
@@ -52,6 +57,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   instead. `weak_chain_depth(node)` returns a node's depth.
 
 ### Fixed
+
+- **`migrate()` now copies propagation properties on nodes.** `Node()`
+  reads `is_weak`/`_propagate`/`parent_relation` as structural arguments
+  and drops attributes starting with `_` (`_weak_init_done`), so:
+  - a NetworkX → NetworkX migration lost them;
+  - a NetworkX → Neo4j/Memgraph migration of a graph after
+    `init_propagation()` crashed (an `is_weak` node without a parent);
+  - from Neo4j they only survived by ending up in the fallback pk.
+  They are now written with `set_node_properties()` after each insert, and
+  never become part of the fallback pk.
+- **`migrate()` from a `MemgraphGraph` crashed** (`Explicit transaction
+  already open`): the batched read path only recognised the exact class
+  name `Neo4jGraph`. It now accepts any subclass.
+  `test/test_migration_propagation.py` migrates a graph with every
+  propagation property between all backend pairs, and checks that the
+  target ends up identical and behaves the same on a propagated delete.
 
 - **NetworkXGraph writes are now atomic, like a Neo4j transaction.** When a
   mutating call or a whole `batch()` failed, nothing was saved to disk, but
