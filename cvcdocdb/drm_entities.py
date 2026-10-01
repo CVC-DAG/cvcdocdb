@@ -1,6 +1,11 @@
-"""Semantic entity definitions for the DRM graph model.
+"""Semantic entity definitions for the DRM graph model (optional module).
 
-rThis module defines domain-specific node types such as ``Individu``, ``Lloc``
+This module is **optional**: ``import cvcdocdb`` doesn't import it. Import
+the entities from here, e.g. ``from cvcdocdb.drm_entities import
+IndividuPadro``. (``from cvcdocdb import IndividuPadro`` still works but is
+deprecated and will be removed in the next major version.)
+
+This module defines domain-specific node types such as ``Individu``, ``Lloc``
 and ``DocumentCultural``. These classes build on :mod:`cvcdocdb.base` to provide
 validation, default labels, and automatic relationship materialisation.
 
@@ -15,7 +20,9 @@ other semantic concepts used throughout the tutorials and examples.
 
 from typing import Any, Dict, Iterable, Tuple
 
-from .base import Node, Relation, WeakNode
+# Atribut (el node "Valor") és part del nucli: el fa servir el mecanisme
+# genèric be_value_properties de base.Node. Es reexporta aquí per compatibilitat.
+from .base import Atribut, Node, Relation, WeakNode  # noqa: F401
 
 
 def assert_on_properties(
@@ -484,32 +491,6 @@ class IndividuAgregat(Node):
         else:
             print(message)
             exit()
-
-
-class Atribut(Node):
-    """A value node wrapping a string attribute.
-
-    Extends Node to represent a string value as a graph node with
-    label "Valor" and a ``name`` primary key derived from the value.
-
-    Args:
-        value: The string value to wrap.
-        **kwargs: Additional node attributes passed to Node.__init__.
-    """
-
-    def __init__(self, value: str, **kwargs: Any) -> None:
-        """Initialize an Atribut value node.
-
-        Args:
-            value: The string value. Stored as ``{"name": value.lower()}`` pk.
-            **kwargs: Passed to Node.__init__ (alternative_labels, etc.).
-        """
-        Node.__init__(
-            self,
-            pk={"name": value.lower()},
-            main_label="Valor",
-            **kwargs,
-        )
 
 
 class Esdeventiment(Node):

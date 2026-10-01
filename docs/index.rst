@@ -2,26 +2,39 @@ cvcdocdb Documentation
 ======================
 
 cvcdocdb (Document Representation Model) is a Python library for graph-based
-document representation with Neo4j and an in-memory NetworkX backend.
+document representation with Neo4j, Memgraph and an in-memory NetworkX
+backend.
+
+The documentation has two parts: the **general** part (the core API, the
+backends, and the tutorials that work on every backend) and the **optional
+modules** (domain entities, ontology import, code generation, PyTorch
+loaders, Text2Cypher), each with its own installation notes, examples,
+tutorials and API.
 
 .. toctree::
    :maxdepth: 1
-   :caption: Contents:
+   :caption: General
 
    tutorials/index
    api/base
-   api/drm_entities
    api/graph_store
-   api/memgraph_graph
    api/migration
-   api/neo4j_graph
-   api/neo4j_enterprise
+
+.. toctree::
+   :maxdepth: 1
+   :caption: Backends
+
    api/networkx_graph
    api/nx_cypher
-   api/rdf_schema
-   api/schema_gen
-   api/text2cypher
-   api/torch_dataloader
+   api/neo4j_graph
+   api/neo4j_enterprise
+   api/memgraph_graph
+
+.. toctree::
+   :maxdepth: 2
+   :caption: Optional modules
+
+   optional/index
 
 Features
 --------
@@ -51,8 +64,8 @@ Features
 - **Vector search (NetworkX only)**: HNSW-based ANN indexing on node
   properties with ``cosine``, ``l2``, and ``ip`` distance spaces.
 - **Propagation properties**: Every node and edge can carry ``_propagate``,
-  ``is_weak``, ``parent_relation``, and ``_dependencies`` flags that enable
-  cascade delete and hierarchical traversal.
+  ``is_weak``, ``parent_relation`` and ``_weak_init_done`` flags that enable
+  cascade delete and hierarchical traversal (see `Propagation Properties`_).
 - **Transactional group creation**: ``create_group()`` creates a strong node
   together with its WeakNodes and WeakRelations in a single isolated
   transaction. On failure the entire group is rolled back.
@@ -60,12 +73,22 @@ Features
   backend graph, detects WeakNodes from edge structure, and initializes
   propagation properties. Supports background mode and progress callbacks.
 - **Backend-to-backend migration**: ``cvcdocdb.migration.migrate()`` copies
-  an entire graph — nodes, edges, and vector indexes — between any two
-  ``GraphStore`` backends (e.g. ``NetworkXGraph`` → ``Neo4jGraph``).
-- **PyTorch / PyTorch Geometric dataloader**: ``cvcdocdb.torch_dataloader``
-  streams a graph into PyG-ready tensors for node embedding models
-  (``MetaPath2Vec``) and link prediction, without loading the whole graph
-  into memory.
+  an entire graph — nodes, edges, propagation properties and vector indexes —
+  between any two ``GraphStore`` backends (e.g. ``NetworkXGraph`` →
+  ``Neo4jGraph``).
+
+**Optional modules** (not imported by ``import cvcdocdb``; see
+:doc:`optional/index`):
+
+- **DRM semantic entities** (``cvcdocdb.drm_entities``): ``IndividuPadro``,
+  ``LlocPadro``, ``Fotografia``...
+- **RiC-O entities** (``cvcdocdb.rico_entities``), generated from the RiC-O ontology.
+- **RDF/OWL ontology conversion** and **class generation**
+  (``cvcdocdb.rdf_schema``, ``cvcdocdb.schema_gen``).
+- **PyTorch / PyTorch Geometric dataloader** (``cvcdocdb.torch_dataloader``):
+  streams a graph into PyG-ready tensors without loading it all into memory.
+- **Text2Cypher** (``cvcdocdb.text2cypher``): natural-language questions
+  translated to Cypher by an LLM.
 
 Primary Key
 -----------
