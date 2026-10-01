@@ -1,6 +1,12 @@
 Natural-language queries (Text2Cypher)
 ======================================
 
+.. admonition:: Optional module
+
+   - **Install:** only on ``Neo4jGraph``: ``pip install "cvcdocdb[graphrag]"`` (``neo4j-graphrag``, Python >= 3.10). Nothing extra on ``NetworkXGraph`` or ``MemgraphGraph``.
+   - **Import:** ``from cvcdocdb import Text2Cypher``
+
+
 :mod:`cvcdocdb.text2cypher` lets you ask questions in natural language to a
 cvcdocdb graph. An LLM translates the question to Cypher and the query is run
 on the graph. The API is the same for every backend, so a script doesn't

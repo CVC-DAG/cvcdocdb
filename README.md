@@ -11,7 +11,7 @@ Archives, libraries, and document collections are rarely flat files: documents h
 - **Two backends**: Full Neo4j integration (`Neo4jGraph`, targeting Neo4j Community Edition; opt-in Enterprise-only features, see [Neo4j editions](#neo4j-editions-community-default-and-enterprise)) a Memgraph backend (`MemgraphGraph`, same propagation policy as Neo4j), or in-memory NetworkX (`NetworkXGraph`) for testing and tutorials
 - **WeakNode hierarchy**: Child entities with composite primary keys and automatic cascade delete through parent-child edges. Inserting a WeakNode inserts all its ancestors. A chain has at most `MAX_WEAK_CHAIN_DEPTH` = 3 nodes (the root plus two levels, e.g. `Document → Section → Page`). Deeper WeakNodes emit a `WeakNodeDepthWarning`, and the next major version will give them an automatic surrogate key
 - **ON DELETE strategies**: CASCADE, RESTRICT, SET NULL -- choose the deletion semantics that fit your use case
-- **Semantic entities**: Domain-specific node types such as `IndividuPadro`, `LlocPadro`, and `Fotografia`
+- **Semantic entities** (optional module, see below): Domain-specific node types such as `IndividuPadro`, `LlocPadro`, and `Fotografia`
 - **FK validation**: Foreign key constraints on relations prevent dangling references
 - **Query and filtering**: Secondary index on scalar properties, multi-filter search with intersection/union, debug snapshots
 - **Vector search (NetworkX only)**: HNSW-based ANN indexing on node properties with `cosine`, `l2`, and `ip` distance spaces
@@ -74,33 +74,58 @@ print("Edges:", graph.get_edges())
 graph.close()
 ```
 
+## Optional modules
+
+The core (`Node`/`WeakNode`/`Relation`, `GraphStore`, `migrate()` and the
+backends) is what `import cvcdocdb` loads. These modules build on it and are
+**optional**: they aren't imported by `import cvcdocdb`, and some need an extra.
+
+| Module | Install | What for |
+|---|---|---|
+| `cvcdocdb.drm_entities` | (none) | DRM semantic entities: `IndividuPadro`, `LlocPadro`, `Fotografia`... |
+| `cvcdocdb.rico_entities` | (none) | RiC-O archival entities generated from the ontology |
+| `cvcdocdb.rdf_schema` | `[rdf]` | RDF/OWL ontology → YAML schema → entity classes |
+| `cvcdocdb.schema_gen` | `[schema]` | Entity classes from a YAML schema |
+| `cvcdocdb.torch_dataloader` | `[torch]` | Stream a graph into PyTorch / PyTorch Geometric |
+| `cvcdocdb.text2cypher` | `[graphrag]`, on Neo4j only | Natural-language questions → Cypher |
+
+```python
+from cvcdocdb.drm_entities import IndividuPadro   # not: from cvcdocdb import IndividuPadro
+```
+
+`from cvcdocdb import IndividuPadro` (and the other DRM entities) still works
+but emits a `DeprecationWarning`; it will be removed in the next major version.
+
 ## Tutorial Notebooks
 
 Runnable Jupyter notebooks in `docs/tutorials/notebooks/`. Each notebook installs the package automatically from the latest release when run.
 
 You can also view them rendered in the [hosted documentation](https://cvc-dag.github.io/cvcdocdb/).
 
-### Getting Started
+### General (any backend)
+
+These use only the common `GraphStore` API, so they run unchanged on
+`NetworkXGraph`, `Neo4jGraph` and `MemgraphGraph`:
 
 - `intro_basics` -- Minimal end-to-end workflow: insert nodes, create WeakNode hierarchies
 - `querying_and_filtering` -- Query operations: `get_node()`, `find_nodes()`, property filtering
-
-### Interactive Demos
-
 - `weaknodes_interactive` -- Build hierarchies with an interactive widget panel
-- `vector_search` -- HNSW vector indexing and nearest-neighbor search
 - `delete_strategies` -- Compare CASCADE, RESTRICT, SET NULL strategies
+- Datasets, each loaded into NetworkX and Neo4j: `karate_club`, `movies`,
+  `game_of_thrones`, `bibliography_openalex`
 
-### Datasets
+### Backend-specific
 
-- `karate_club` -- Zachary Karate Club (34 members)
-- `movies` -- Movie-domain graph (actors, genres, films)
-- `game_of_thrones` -- Character-house graph
-- `bibliography_openalex` -- OpenAlex bibliographic references with citations
+- **NetworkX**: `vector_search` -- HNSW vector indexing and nearest-neighbor search (`NetworkXGraph` only)
+- **Neo4j**: `propagation_demo` -- full propagation workflow on a real Neo4j database
+  (also as a script: `python -m cvcdocdb.exemples.demo_propagation`)
+- **Memgraph**: no specific notebook; every general one runs on `MemgraphGraph` as is
 
-### Ontologies
+### Optional modules
 
-- `generating_classes_from_owl` -- Generate Python entity classes from RDF/OWL ontologies
+- `cvcdocdb.rdf_schema` / `cvcdocdb.schema_gen`: `generating_classes_from_owl` -- Generate Python entity classes from RDF/OWL ontologies
+- `cvcdocdb.rico_entities`: `ric_o_demo` (Neo4j) and `ric_o_networkx_demo` (NetworkX) -- the RiC-O model on each backend
+- `cvcdocdb.torch_dataloader`: `torch_dataloader_bibliography` -- PyTorch/PyG dataloader, MetaPath2Vec training and link prediction
 
 ## RDF/OWL Ontology Conversion
 
@@ -149,7 +174,9 @@ The pipeline maps OWL constructs to DRM:
 
 ## Example Dataset Loaders (cvcdocdb.exemples)
 
-The package includes ready-to-run loaders for common graph domains:
+The package includes ready-to-run loaders for common graph domains. They
+accept any backend (`NetworkXGraph`, `Neo4jGraph`, `MemgraphGraph`); the
+`neo4j_*`/`networkx_*` module names are historical:
 
 - `cvcdocdb.exemples.networkx_karate` -- Karate Club graph (NetworkX classic)
 - `cvcdocdb.exemples.networkx_bibliografia` -- Bibliographic references from OpenAlex

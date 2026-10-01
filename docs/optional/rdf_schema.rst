@@ -1,6 +1,20 @@
 RDF / OWL ontology conversion
 ==============================
 
+.. admonition:: Optional module
+
+   - **Install:** ``pip install "cvcdocdb[rdf]"`` (``rdflib``, ``pyyaml``).
+   - **Import:** ``from cvcdocdb.rdf_schema import ...``
+
+
+Tutorials
+---------
+
+.. toctree::
+   :maxdepth: 1
+
+   ../tutorials/notebooks/datasets/generating_classes_from_owl
+
 The :mod:`cvcdocdb.rdf_schema` module provides the full pipeline for converting
 RDF/OWL ontologies into CVCDocDB YAML schemas and Python entity classes.
 

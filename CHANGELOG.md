@@ -141,6 +141,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Documentation
 
+- **The documentation is split into a general part and optional modules.**
+  The general part covers the core API, the backends and the tutorials that
+  work on every backend. "Optional modules" has one page per module
+  (`drm_entities`, the new `rico_entities` page, `rdf_schema`, `schema_gen`,
+  `torch_dataloader`, `text2cypher`), each with its installation notes,
+  examples, own tutorials and API (moved from `docs/api/` to
+  `docs/optional/`). Backend-specific examples are grouped by backend
+  (NetworkX: vector search; Neo4j: propagation demo; Memgraph: none needed).
+  The README follows the same structure.
 
 - README, Sphinx docs and `test/README.md` now state explicitly that
   cvcdocdb targets Neo4j Community Edition, and that the Enterprise features

@@ -1,6 +1,15 @@
 Schema-based class generation
 ==============================
 
+.. admonition:: Optional module
+
+   - **Install:** ``pip install "cvcdocdb[schema]"`` (``pyyaml``).
+   - **Import:** ``from cvcdocdb.schema_gen import generate_classes, generate_file``
+
+
+Tutorial: :doc:`../tutorials/notebooks/datasets/generating_classes_from_owl`
+(with :doc:`rdf_schema`).
+
 The :mod:`cvcdocdb.schema_gen` module generates Python entity classes from a YAML
 schema. It is used by :mod:`cvcdocdb.rdf_schema` internally and can also be called
 directly with any YAML conforming to the ``GraphStore.schema_yaml()`` format.
