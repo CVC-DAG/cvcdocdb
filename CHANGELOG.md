@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Opt-in Neo4j Enterprise mode** (backward-compatible: the default is
+  unchanged). `Neo4jGraph(..., edition="community")` is the default, and
+  cvcdocdb keeps targeting and testing Neo4j Community Edition.
+  `edition="enterprise"` enables Enterprise-only operations (new module
+  `cvcdocdb.neo4j_enterprise`):
+  `create_node_key_constraint()`, `create_property_existence_constraint()`
+  (nodes or relationships), `create_property_type_constraint()` (Neo4j 5.9+),
+  `create_database()` and `drop_database()`. In Community mode they raise
+  `EnterpriseFeatureError` without contacting the server. In Enterprise mode,
+  each call checks `server_edition()` first, and the constructor emits a
+  `UserWarning`. These features require an Enterprise license and are not
+  fully tested: CI runs on Community only, and the real-server tests need
+  `NEO4J_ENTERPRISE_URL`. New, edition-independent helpers:
+  `server_edition()` and `drop_constraint()`.
+
+### Documentation
+
+- README, Sphinx docs and `test/README.md` now state explicitly that
+  cvcdocdb targets Neo4j Community Edition, and that the Enterprise features
+  need a license and are not fully tested.
+
 ## [1.4.0] - 2026-09-28
 
 ### Added

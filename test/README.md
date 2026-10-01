@@ -86,6 +86,22 @@ pytest test/ -m slow
 docker compose -f docker-compose.neo4j.yml down
 ```
 
+### Neo4j Enterprise tests (optional, not run in CI)
+
+CI and the automatic Docker container use **Neo4j Community**, so the
+Enterprise-only features (`Neo4jGraph(edition="enterprise")`) are only checked
+without a server: the generated Cypher, and that Community mode refuses them.
+To run `test/test_neo4j_enterprise.py::EnterpriseServerTest` against a real
+**Neo4j Enterprise** server (this requires a license you are entitled to use):
+
+```bash
+export NEO4J_ENTERPRISE_URL=bolt://enterprise-host:7687
+export NEO4J_ENTERPRISE_USER=neo4j
+export NEO4J_ENTERPRISE_PASSWORD=...
+export NEO4J_ENTERPRISE_DATABASE=neo4j   # optional
+pytest test/test_neo4j_enterprise.py -m slow
+```
+
 ## Test files
 
 ### Unit (no graph store)
@@ -107,6 +123,7 @@ docker compose -f docker-compose.neo4j.yml down
 - `test_create_graph.py` — Neo4j node/relation creation
 - `test_neo4j_real.py` — Real Neo4j workflow tests
 - `test_graph_store_contract.py::TestNeo4jGraph` — Contract tests
+- `test_neo4j_enterprise.py` — Community default / opt-in Enterprise mode (Enterprise server tests need `NEO4J_ENTERPRISE_URL`)
 
 ## CI
 
