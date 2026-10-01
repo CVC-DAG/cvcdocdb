@@ -563,6 +563,46 @@ Authors
 - Jialuo Chen
 - Adrià Molina
 
+Third-party software and licenses
+---------------------------------
+
+CVCDocDB itself is licensed under the GNU General Public License v3 or later (see ``LICENSE`` in the repository). It does **not** include or redistribute any database server. It talks to Neo4j, Memgraph and Apache Jena Fuseki over their network protocols (Bolt, HTTP/SPARQL), and each server is a separate product under its own license. Installing, running and licensing a server is the responsibility of whoever deploys it.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 25 30 45
+
+   * - Software
+     - Used by
+     - License
+   * - `Neo4j <https://neo4j.com/licensing/>`_ Community Edition
+     - ``Neo4jGraph`` (default)
+     - GPL-3.0
+   * - Neo4j Enterprise Edition
+     - ``Neo4jGraph(edition="enterprise")``
+     - Commercial: needs an Enterprise license
+   * - `Memgraph <https://github.com/memgraph/memgraph/tree/master/licenses>`_
+     - ``MemgraphGraph``
+     - Business Source License 1.1. It is source-available, not open source: production use is limited by its Additional Use Grant, and it converts to Apache-2.0 on its Change Date. Enterprise features fall under the Memgraph Enterprise License.
+   * - `Apache Jena Fuseki <https://jena.apache.org/>`_
+     - ``JenaGraph``
+     - Apache-2.0
+
+Python packages installed with CVCDocDB are under licenses compatible with the GPL-3.0:
+
+* ``neo4j`` (driver): Apache-2.0
+* ``networkx``, ``numpy``: BSD-3-Clause
+* ``filelock``: MIT
+* ``tqdm``: MPL-2.0 and MIT
+* Optional extras: ``neo4j-graphrag`` and ``hnswlib`` (Apache-2.0), ``rdflib`` (BSD-3-Clause), ``pyyaml`` and ``torch_geometric`` (MIT), ``torch`` (BSD-style; see its metadata).
+
+The Docker images used by the test suite and CI (``neo4j:5-community``,
+``memgraph/memgraph``, ``secoresearch/fuseki``) are only pulled to run tests. They
+are not part of the CVCDocDB package.
+
+This section is informative, not legal advice: check each license for your
+use case.
+
 Acknowledgements
 ----------------
 
