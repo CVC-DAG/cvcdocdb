@@ -27,6 +27,7 @@ jobs:
         env:
           MEMGRAPH_USER: memgraph
           MEMGRAPH_PASSWORD: testpassword123
+      FUSEKI_URL: http://localhost:3030/ds
         ports:
           - 7688:7687
 
@@ -73,6 +74,21 @@ jobs:
             sleep 2
           done
           echo "Memgraph did not become reachable in time" >&2
+          exit 1
+
+      - name: Start Apache Jena Fuseki
+        # Not a service container: Fuseki needs its own command line (a clean
+        # TDB2 dataset /ds with query + update), which services can't set.
+        run: |
+          docker run -d --name fuseki -p 3030:3030 -e FUSEKI_BASE=/tmp/base \
+            -w /jena-fuseki --entrypoint sh secoresearch/fuseki:6.2.0 -c \
+            "mkdir -p /tmp/db /tmp/base && exec java -cp '*:/javalibs/*' org.apache.jena.fuseki.main.cmds.FusekiServerCmd --tdb2 --loc /tmp/db --update /ds"
+          for i in $(seq 1 60); do
+            curl -sf -o /dev/null "$FUSEKI_URL/query?query=ASK%7B%7D" && exit 0
+            sleep 2
+          done
+          docker logs fuseki
+          echo "Fuseki did not become reachable in time" >&2
           exit 1
 
       - name: Run test suite (unit + integration + slow)

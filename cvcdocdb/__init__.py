@@ -38,6 +38,10 @@ def __getattr__(name):
         from .neo4j_graph import Neo4jGraph
 
         return Neo4jGraph
+    if name == "JenaGraph":
+        from .jena_graph import JenaGraph
+
+        return JenaGraph
     if name == "MemgraphGraph":
         from .memgraph_graph import MemgraphGraph
 

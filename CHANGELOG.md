@@ -9,6 +9,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Apache Jena backend: `JenaGraph`** (`cvcdocdb.jena_graph`, also
+  `from cvcdocdb import JenaGraph`). It stores the graph as RDF 1.2 in
+  Apache Jena Fuseki or another SPARQL 1.2 store, with the same API and
+  behaviour as every other backend: it reuses the `NetworkXGraph` logic
+  (identical to Neo4j's) on an in-memory copy of the graph.
+  - Every mutating call, or a whole `batch()`, is sent as one atomic SPARQL
+    Update with only the changes. A version stamp detects concurrent writers
+    and raises `ConcurrentModificationError`; nothing is applied.
+  - `query()` runs SPARQL on the server (SPARQL Update is refused), and dict
+    filters and Cypher on the copy.
+  - The RDF layout (`cvcdocdb.jena_rdf`) is queryable directly: label
+    classes, `prop:` values, `rel:` triples with RDF 1.2 annotations for
+    relationship properties. `namespace`/`graph_iri` isolate it from other
+    data, and `clear()` empties it. No extra dependency (HTTP via the
+    standard library, `cvcdocdb.sparql_client`).
+  - The graph has to fit in RAM, and vector indexes are not supported.
+  - Tested with Fuseki 6.2.0: the `GraphStore` contract suite, the
+    propagation contract, the 21 shared propagation scenarios (identical
+    results to NetworkX, hence to Neo4j), and migration to and from every
+    other backend. CI runs a Fuseki container, and `conftest.py` starts one
+    (port 3030) when none is reachable.
 - **`GraphStore.set_node_properties(node_id, properties)`** (NetworkX, Neo4j,
   Memgraph). Sets properties on an existing node verbatim
   (`SET n += $props`), including keys that `Node()` can't carry. Raises

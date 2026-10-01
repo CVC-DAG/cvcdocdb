@@ -32,21 +32,27 @@ REPRESENTATION_KEYS = frozenset({"pk", "labels", "main_label"})
 
 
 def snapshot(graph: Any, ignore: Iterable[str] = ()) -> Dict[str, Any]:
-    """Graf normalitzat, independent dels identificadors interns."""
-    ignored = frozenset(ignore)
-    rows = graph.query("MATCH (n) RETURN id(n) AS id, labels(n) AS labels, properties(n) AS props")
-    keys: Dict[int, Tuple[Any, ...]] = {}
+    """Graf normalitzat, independent dels identificadors interns.
+
+    Només fa servir l'API comuna de GraphStore (get_node_ids/get_node_attrs/
+    get_edges/get_edge_attrs), de manera que serveix per a qualsevol backend,
+    també els que no parlen Cypher (JenaGraph). ``pk``, ``main_label`` i
+    ``labels`` són representació, no propietats: les etiquetes es prenen de
+    ``labels``."""
+    ignored = frozenset(ignore) | REPRESENTATION_KEYS
+    keys: Dict[Any, Tuple[Any, ...]] = {}
     nodes = []
-    for row in rows:
-        props = {k: v for k, v in row["props"].items() if k not in ignored}
-        key = (tuple(sorted(row["labels"])), tuple(sorted((k, repr(v)) for k, v in props.items())))
-        keys[row["id"]] = key
+    for node_id in graph.get_node_ids():
+        attrs = graph.get_node_attrs(node_id) or {}
+        labels = attrs.get("labels") or [attrs.get("main_label", "")]
+        props = {k: v for k, v in attrs.items() if k not in ignored}
+        key = (tuple(sorted(labels)), tuple(sorted((k, repr(v)) for k, v in props.items())))
+        keys[node_id] = key
         nodes.append(key)
     edges = [
-        (keys[row["src"]], row["type"], keys[row["dst"]], tuple(sorted((k, repr(v)) for k, v in row["props"].items())))
-        for row in graph.query(
-            "MATCH (a)-[r]->(b) RETURN id(a) AS src, type(r) AS type, id(b) AS dst, properties(r) AS props"
-        )
+        (keys[src], rel_type, keys[dst],
+         tuple(sorted((k, repr(v)) for k, v in (graph.get_edge_attrs(src, dst, rel_type) or {}).items())))
+        for src, dst, rel_type in graph.get_edges()
     ]
     return {"nodes": sorted(nodes), "edges": sorted(edges)}
 

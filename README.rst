@@ -11,7 +11,7 @@ CVCDocDB
 Features
 --------
 
-* **Two backends**: Full Neo4j integration (``Neo4jGraph``, targeting Neo4j Community Edition; opt-in Enterprise-only features, see *Neo4j editions* below) a Memgraph backend (``MemgraphGraph``, same propagation policy as Neo4j), or in-memory NetworkX (``NetworkXGraph``) for testing and tutorials
+* **Two backends**: Full Neo4j integration (``Neo4jGraph``, targeting Neo4j Community Edition; opt-in Enterprise-only features, see *Neo4j editions* below) a Memgraph backend (``MemgraphGraph``, same propagation policy as Neo4j), an Apache Jena SPARQL backend (``JenaGraph``, RDF 1.2 in Fuseki), or in-memory NetworkX (``NetworkXGraph``) for testing and tutorials
 * **WeakNode hierarchy**: Child entities with composite primary keys and automatic cascade delete through parent-child edges. Inserting a WeakNode inserts all its ancestors. A chain has at most ``MAX_WEAK_CHAIN_DEPTH`` = 3 nodes (the root plus two levels, e.g. ``Document → Section → Page``). Deeper WeakNodes emit a ``WeakNodeDepthWarning``, and the next major version will give them an automatic surrogate key
 * **ON DELETE strategies**: CASCADE, RESTRICT, SET NULL -- choose the deletion semantics that fit your use case
 * **Semantic entities** (optional module, see below): Domain-specific node types such as ``IndividuPadro``, ``LlocPadro``, and ``Fotografia``
@@ -232,6 +232,40 @@ errors. The only Memgraph-specific code is pk indexes (``SHOW INDEX INFO``,
 ``schema_yaml()``. The Neo4j Enterprise features are not available on
 Memgraph (``EnterpriseFeatureError``), and neither is ``drop_constraint()``.
 Tested with Memgraph 3.13 (Community).
+
+Apache Jena backend (SPARQL)
+----------------------------
+
+``JenaGraph`` stores the graph as RDF 1.2 in `Apache Jena Fuseki <https://jena.apache.org/documentation/fuseki2/>`_
+(or another SPARQL 1.2 store), with the same API and behaviour as every other
+backend:
+
+.. code-block:: python
+
+    from cvcdocdb import JenaGraph, Node
+
+    graph = JenaGraph("http://localhost:3030/ds")          # a Fuseki dataset
+    graph.insertNode(Node(pk={"doc": "D1"}, main_label="Document", title="Padró"))
+    graph.query("PREFIX label: <urn:cvcdocdb:label/> PREFIX prop: <urn:cvcdocdb:prop/> "
+                "SELECT ?t WHERE { ?d a label:Document ; prop:title ?t }")   # [{'t': 'Padró'}]
+
+* **Same behaviour:** it reuses the ``NetworkXGraph`` logic, which is identical
+  to ``Neo4jGraph``'s, on an in-memory copy of the graph. The graph has to fit
+  in RAM.
+* **Atomic writes:** every mutating call, or a whole ``batch()``, is sent as
+  one atomic SPARQL Update with only what changed.
+* **Concurrent writes:** a version stamp detects writes from other clients
+  and raises ``ConcurrentModificationError``; nothing is applied.
+* **Querying:** ``query()`` runs SPARQL strings on the server. SPARQL Update is
+  refused, so writes always go through the API. Dict filters and Cypher run
+  on the copy.
+* **RDF layout:** nodes are ``<urn:cvcdocdb:node/ID>``, with ``a label:…`` and
+  ``prop:…`` values. Relationships are ``rel:…`` triples, and their properties
+  are RDF 1.2 annotations (``?a rel:X ?b {| prop:p ?v |}``).
+* **Isolation:** ``namespace`` and ``graph_iri`` keep it apart from other data
+  in the dataset.
+
+Tested with Apache Jena Fuseki 6.2.0. Vector indexes are not supported (as on Neo4j).
 
 Neo4j editions: Community (default) and Enterprise
 --------------------------------------------------

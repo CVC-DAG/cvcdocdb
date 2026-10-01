@@ -2,8 +2,8 @@ cvcdocdb Documentation
 ======================
 
 cvcdocdb (Document Representation Model) is a Python library for graph-based
-document representation with Neo4j, Memgraph and an in-memory NetworkX
-backend.
+document representation with Neo4j, Memgraph, Apache Jena (SPARQL) and an
+in-memory NetworkX backend.
 
 The documentation has two parts: the **general** part (the core API, the
 backends, and the tutorials that work on every backend) and the **optional
@@ -29,6 +29,7 @@ tutorials and API.
    api/neo4j_graph
    api/neo4j_enterprise
    api/memgraph_graph
+   api/jena_graph
 
 .. toctree::
    :maxdepth: 2
@@ -45,7 +46,8 @@ Features
   Neo4j Community Edition; opt-in Enterprise-only features, see
   `Neo4j editions: Community (default) and Enterprise`_), a Memgraph
   backend via ``MemgraphGraph`` (same propagation policy, see
-  `Memgraph backend`_), or an
+  `Memgraph backend`_), an Apache Jena (SPARQL) backend via ``JenaGraph``
+  (the graph as RDF 1.2 in Fuseki, see :doc:`api/jena_graph`), or an
   in-memory ``NetworkXGraph`` (NetworkX) for testing and tutorials.
 - **Two entity levels**: Root entities (``Node``) and child entities
   (``WeakNode``) with composite primary keys and cascade delete
