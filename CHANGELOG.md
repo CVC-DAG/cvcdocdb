@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **`JenaGraph` requires Apache Jena Fuseki >= 6.2.0** (`MIN_FUSEKI_VERSION`).
+  It reads the version from Fuseki's `/$/server` endpoint on connection,
+  before reading any data, and raises `FusekiVersionError` if it is older
+  (these versions lack RDF 1.2) or can't be determined. The version is
+  exposed as `graph.server_version`. Pass `server_url=` if Fuseki is behind
+  a proxy. Behaviour change: another SPARQL 1.2 store is now refused by
+  default; pass `check_fuseki_version=False` to keep using it, at your own
+  risk.
+
+- The PyPI summary now lists every backend: Neo4j, Memgraph, Apache Jena
+  (SPARQL) and NetworkX.
+
 ### Fixed
 
 - **`Neo4jGraph` no longer triggers the Neo4j driver's `PreviewWarning`**
@@ -21,11 +35,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   until garbage collection, and the driver warned with a `ResourceWarning`
   ("unclosed Session") and a `DeprecationWarning` (future drivers won't close
   sessions on destruction). `close()` is now idempotent.
-
-### Changed
-
-- The PyPI summary now lists every backend: Neo4j, Memgraph, Apache Jena
-  (SPARQL) and NetworkX.
 
 ## [1.5.0] - 2026-10-01
 

@@ -2,7 +2,7 @@ Apache Jena backend (SPARQL)
 ============================
 
 :mod:`cvcdocdb.jena_graph` stores graphs as RDF 1.2 in Apache Jena Fuseki (or
-another SPARQL 1.2 store), with the same API and behaviour as every other
+another SPARQL 1.2 store, see below), with the same API and behaviour as every other
 backend. :mod:`cvcdocdb.jena_rdf` defines the RDF layout, so the data can also
 be queried directly with SPARQL.
 
@@ -37,7 +37,15 @@ How it works:
   a named graph. ``clear()`` deletes everything in the namespace.
 - Vector indexes are not supported (as on Neo4j).
 
-Tested with Apache Jena Fuseki 6.2.0. Natural-language questions:
+**Requirement: Apache Jena Fuseki >= 6.2.0** (RDF 1.2 triple terms and
+annotations). ``JenaGraph`` reads the version from Fuseki's ``/$/server``
+endpoint on connection, before reading any data, and raises
+:class:`~cvcdocdb.jena_graph.FusekiVersionError` if it is older or can't be
+determined. Pass ``server_url=`` if Fuseki is behind a proxy, or
+``check_fuseki_version=False`` to use another SPARQL 1.2 store at your own
+risk. The version is available as ``graph.server_version``.
+
+Natural-language questions:
 :doc:`../optional/text2sparql` or :doc:`../optional/text2query`.
 
 .. automodule:: cvcdocdb.jena_graph

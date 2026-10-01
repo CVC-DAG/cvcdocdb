@@ -304,3 +304,100 @@ class JenaNamedGraphTest(unittest.TestCase):
         finally:
             graph.clear()
             graph.close()
+
+
+# ---------------------------------------------------------------------------
+# Versió mínima de Fuseki (>= 6.2.0)
+# ---------------------------------------------------------------------------
+
+
+class FusekiVersionTest(unittest.TestCase):
+    """JenaGraph exigeix Apache Jena Fuseki >= 6.2.0 (via ``/$/server``)."""
+
+    def _connect(self, info: Any, **kwargs: Any) -> Any:
+        from unittest import mock
+
+        from cvcdocdb import jena_graph
+
+        def fake_fetch(url: str, client: Any) -> Any:
+            if isinstance(info, Exception):
+                raise info
+            return info
+
+        loads = []
+        with mock.patch.object(jena_graph, "_fetch_server_info", side_effect=fake_fetch), \
+                mock.patch.object(jena_graph.JenaGraph, "_load_state", lambda self: loads.append(1)):
+            graph = jena_graph.JenaGraph("http://fuseki.example:3030/ds", **kwargs)
+        return graph, loads
+
+    def test_minimum_version_is_6_2_0(self) -> None:
+        from cvcdocdb.jena_graph import MIN_FUSEKI_VERSION
+
+        self.assertEqual(MIN_FUSEKI_VERSION, (6, 2, 0))
+
+    def test_supported_versions_are_accepted(self) -> None:
+        for version in ("6.2.0", "6.2.1", "6.10.0", "7.0.0", "6.3.0-SNAPSHOT"):
+            with self.subTest(version=version):
+                graph, loads = self._connect({"version": version})
+                self.assertEqual(graph.server_version, version)
+                self.assertEqual(loads, [1])
+
+    def test_older_versions_are_refused_before_reading_any_data(self) -> None:
+        from cvcdocdb.jena_graph import FusekiVersionError
+
+        for version in ("6.1.9", "5.6.0", "4.10.0", "6.2.0-rc1"):
+            with self.subTest(version=version):
+                with self.assertRaises(FusekiVersionError) as caught:
+                    self._connect({"version": version})
+                self.assertIn(version, str(caught.exception))
+                self.assertIn("6.2.0", str(caught.exception))
+
+    def test_unknown_version_is_refused_by_default(self) -> None:
+        from cvcdocdb.jena_graph import FusekiVersionError, SparqlError
+
+        for info in (SparqlError("HTTP 404"), {"name": "not fuseki"}, {"version": "unknown"}):
+            with self.subTest(info=info):
+                with self.assertRaises(FusekiVersionError) as caught:
+                    self._connect(info)
+                self.assertIn("check_fuseki_version=False", str(caught.exception))
+
+    def test_check_can_be_disabled_for_other_sparql_stores(self) -> None:
+        from cvcdocdb.jena_graph import SparqlError
+
+        graph, loads = self._connect(SparqlError("HTTP 404"), check_fuseki_version=False)
+        self.assertIsNone(graph.server_version)
+        self.assertEqual(loads, [1])
+
+    def test_server_url_is_derived_from_the_dataset_url(self) -> None:
+        from cvcdocdb.jena_graph import _server_info_urls
+
+        self.assertEqual(_server_info_urls("http://h:3030/ds"), ["http://h:3030/$/server"])
+        self.assertEqual(
+            _server_info_urls("https://h/sparql/ds/"),
+            ["https://h/sparql/$/server", "https://h/$/server"],
+        )
+
+    def test_explicit_server_url(self) -> None:
+        from unittest import mock
+
+        from cvcdocdb import jena_graph
+
+        seen = []
+        with mock.patch.object(jena_graph, "_fetch_server_info",
+                               side_effect=lambda url, client: seen.append(url) or {"version": "6.2.0"}), \
+                mock.patch.object(jena_graph.JenaGraph, "_load_state", lambda self: None):
+            jena_graph.JenaGraph("http://proxy/x/ds", server_url="http://fuseki:3030")
+        self.assertEqual(seen, ["http://fuseki:3030/$/server"])
+
+
+@pytest.mark.slow
+class FusekiVersionOnRealServerTest(unittest.TestCase):
+    def test_real_server_reports_a_supported_version(self) -> None:
+        graph = _fresh_jena()
+        try:
+            self.assertIsNotNone(graph.server_version)
+            from cvcdocdb.jena_graph import MIN_FUSEKI_VERSION, _parse_version
+
+            self.assertGreaterEqual(_parse_version(graph.server_version), MIN_FUSEKI_VERSION)
+        finally:
+            graph.close()
