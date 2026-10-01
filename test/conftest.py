@@ -211,8 +211,24 @@ def _maybe_start_docker_memgraph() -> None:
     )
 
 
+def _preimport_neo4j_graphrag() -> None:
+    """Import neo4j_graphrag before any test module is collected.
+
+    test_drm.py replaces ``neo4j`` with a mock in ``sys.modules`` when it is
+    imported, for the rest of the session. Text2Cypher imports
+    neo4j_graphrag lazily, so importing it later would bind it to that mock
+    and fail. Imported here, it binds to the real driver.
+    """
+    try:
+        import neo4j_graphrag.exceptions  # noqa: F401
+        import neo4j_graphrag.retrievers  # noqa: F401
+    except ImportError:
+        pass
+
+
 def pytest_configure(config):
     """Register custom markers and (if needed) start a local Neo4j container."""
+    _preimport_neo4j_graphrag()
     config.addinivalue_line(
         "markers", "unit: fast tests with no graph store"
     )

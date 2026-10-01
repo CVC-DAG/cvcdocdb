@@ -192,23 +192,31 @@ def _neo4j_config():
     )
 
 
-@pytest.fixture(
-    params=[
-        "networkx",
-        pytest.param("neo4j", marks=pytest.mark.slow),
-    ]
-)
-def populated_graph(request, tmp_path):
-    """A small Document -HAS_PAGE-> Page graph on the requested backend."""
-    suffix = uuid.uuid4().hex[:8]
-    doc_label, page_label = f"T2CDoc{suffix}", f"T2CPage{suffix}"
+def _memgraph_config():
+    url = os.environ.get("MEMGRAPH_URL")
+    if not url:
+        return None
+    parsed = urlparse(url)
+    try:
+        with socket.create_connection((parsed.hostname, parsed.port or 7687), 0.5):
+            pass
+    except OSError:
+        return None
+    return dict(
+        url=url,
+        user=os.environ.get("MEMGRAPH_USER", ""),
+        password=os.environ.get("MEMGRAPH_PASSWORD", ""),
+        database=os.environ.get("MEMGRAPH_DATABASE") or None,
+    )
 
-    if request.param == "networkx":
+
+def _open_backend(name, tmp_path):
+    """(graph, cleanup) on the named backend, or pytest.skip if unavailable."""
+    if name == "networkx":
         from cvcdocdb.networkx_graph import NetworkXGraph
 
-        graph = NetworkXGraph(persistence_path=str(tmp_path / "g.pkl"))
-        cleanup = None
-    else:
+        return NetworkXGraph(persistence_path=str(tmp_path / f"{uuid.uuid4().hex}.pkl"))
+    if name == "neo4j":
         if not HAS_GRAPHRAG:
             pytest.skip("neo4j-graphrag not installed")
         config = _neo4j_config()
@@ -216,7 +224,31 @@ def populated_graph(request, tmp_path):
             pytest.skip("Neo4j not reachable")
         from cvcdocdb.neo4j_graph import Neo4jGraph
 
-        graph = Neo4jGraph(**config)
+        return Neo4jGraph(**config)
+    config = _memgraph_config()
+    if config is None:
+        pytest.skip("Memgraph not reachable")
+    from cvcdocdb.memgraph_graph import MemgraphGraph
+
+    return MemgraphGraph(**config)
+
+
+BACKENDS = [
+    "networkx",
+    pytest.param("neo4j", marks=pytest.mark.slow),
+    pytest.param("memgraph", marks=pytest.mark.slow),
+]
+
+
+@pytest.fixture(params=BACKENDS)
+def populated_graph(request, tmp_path):
+    """A small Document -HAS_PAGE-> Page graph on the requested backend."""
+    suffix = uuid.uuid4().hex[:8]
+    doc_label, page_label = f"T2CDoc{suffix}", f"T2CPage{suffix}"
+
+    graph = _open_backend(request.param, tmp_path)
+    cleanup = None
+    if request.param != "networkx":
 
         def cleanup():
             graph.query(
@@ -305,6 +337,12 @@ class TestText2CypherPortable:
 
         assert Text2Cypher(graph, llm=_MyLLM()).query("?").records == [{"n": 2}]
 
+    def test_invalid_cypher_raises_text2cypher_error(self, populated_graph):
+        graph, _, page_label = populated_graph
+        t2c = Text2Cypher(graph, llm=lambda p: f"MATCH (p:{page_label} RETURN p")
+        with pytest.raises(Text2CypherError):
+            t2c.query("pages?")
+
     def test_write_queries_are_refused(self, populated_graph):
         graph, _, page_label = populated_graph
         t2c = Text2Cypher(graph, llm=lambda p: f"MATCH (n:{page_label}) DETACH DELETE n")
@@ -358,3 +396,56 @@ def test_networkx_needs_no_retriever(tmp_path):
 
     graph = NetworkXGraph(persistence_path=str(tmp_path / "g.pkl"))
     assert Text2Cypher(graph, llm=lambda p: "RETURN 1").retriever is None
+
+
+# ----------------------------------------------------------------------
+# Every backend shows the LLM exactly the same schema
+# ----------------------------------------------------------------------
+
+
+def _build_schema_graph(graph, suffix):
+    from cvcdocdb.base import WeakNode
+
+    doc = Node(pk={"doc": "D1"}, main_label=f"SDoc{suffix}", alternative_labels=[f"SItem{suffix}"],
+               title="Padró", year=1905, score=0.5, public=True)
+    page = WeakNode(parent=doc, pk={"page": 1}, main_label=f"SPage{suffix}", parent_relation="HAS_PAGE",
+                    tags=["a", "b"])
+    graph.insertNode(page)
+    other = Node(pk={"id": 1}, main_label=f"SReader{suffix}")
+    graph.insertNode(other)
+    graph.insertRelation(Relation(src=other, dst=doc, rel_type="READS", times=3))
+    graph.init_propagation()
+
+
+@pytest.mark.slow
+def test_schema_is_identical_on_every_backend(tmp_path):
+    suffix = uuid.uuid4().hex[:8]
+    schemas = {}
+    for name in ("networkx", "neo4j", "memgraph"):
+        try:
+            graph = _open_backend(name, tmp_path)
+        except pytest.skip.Exception:
+            continue
+        try:
+            if name != "networkx":
+                graph.query("MATCH (n) DETACH DELETE n")
+            _build_schema_graph(graph, suffix)
+            schemas[name] = Text2Cypher(graph, llm=lambda p: "RETURN 1").schema
+        finally:
+            if name != "networkx":
+                graph.query("MATCH (n) DETACH DELETE n")
+            graph.close()
+    if len(schemas) < 2:
+        pytest.skip("needs at least two backends")
+    reference = schemas.get("neo4j", schemas["networkx"])
+    for name, schema in schemas.items():
+        assert schema == reference, f"{name} schema differs:\n{schema}\n--- vs ---\n{reference}"
+
+
+@pytest.mark.slow
+def test_memgraph_needs_no_retriever(tmp_path):
+    graph = _open_backend("memgraph", tmp_path)
+    try:
+        assert Text2Cypher(graph, llm=lambda p: "RETURN 1").retriever is None
+    finally:
+        graph.close()

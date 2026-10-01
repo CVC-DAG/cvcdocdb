@@ -58,6 +58,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`Text2Cypher` didn't work on `MemgraphGraph`.** It treated it as Neo4j:
+  `neo4j_graphrag`'s retriever fails on Memgraph (`CALL dbms.components()`
+  without `YIELD`), and so do `db.info()` and `db.schema.*`. Memgraph now
+  takes cvcdocdb's own path (write-clause check + `graph.query()`), with the
+  schema read with plain Cypher. It doesn't need `cvcdocdb[graphrag]`.
+- **The `Text2Cypher` schema is now the same text on every backend.**
+  NetworkX ignored alternative labels, and the property order on Neo4j
+  depended on `db.schema.*`. All backends now list every label, with
+  labels and properties in alphabetical order.
+  `test_schema_is_identical_on_every_backend` checks it on NetworkX, Neo4j
+  and Memgraph, and the portable Text2Cypher tests now run on Memgraph too.
+  `requirements-test.txt` now installs `neo4j-graphrag`, so CI runs the
+  Neo4j Text2Cypher tests, and `conftest.py` imports it before
+  `test_drm.py` mocks `neo4j`.
 - **`migrate()` now copies propagation properties on nodes.** `Node()`
   reads `is_weak`/`_propagate`/`parent_relation` as structural arguments
   and drops attributes starting with `_` (`_weak_init_done`), so:
