@@ -238,7 +238,7 @@ Memgraph 3.13 (Community).
 ## Apache Jena backend (SPARQL)
 
 `JenaGraph` stores the graph as RDF 1.2 in [Apache Jena Fuseki](https://jena.apache.org/documentation/fuseki2/)
-(or another SPARQL 1.2 store), with the same API and behaviour as every other
+(version 6.2.0 or later), with the same API and behaviour as every other
 backend:
 
 ```python
@@ -267,7 +267,7 @@ graph.query("PREFIX label: <urn:cvcdocdb:label/> PREFIX prop: <urn:cvcdocdb:prop
   in the dataset.
 - **Natural language:** `Text2SPARQL`, or `Text2Query` for any backend.
 
-Tested with Apache Jena Fuseki 6.2.0. Vector indexes are not supported (as on Neo4j).
+Requires **Apache Jena Fuseki >= 6.2.0**, checked on connection through `/$/server` (`FusekiVersionError` otherwise; pass `server_url=` if Fuseki is behind a proxy, or `check_fuseki_version=False` to use another SPARQL 1.2 store at your own risk). Vector indexes are not supported (as on Neo4j).
 
 ## Neo4j editions: Community (default) and Enterprise
 

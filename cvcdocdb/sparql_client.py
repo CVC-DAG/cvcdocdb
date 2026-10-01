@@ -64,6 +64,21 @@ class SparqlClient:
         except (urllib.error.URLError, OSError) as exc:
             raise SparqlError(f"Could not reach the SPARQL server at {url}: {exc}") from exc
 
+    def get_json(self, url: str) -> Any:
+        """GET *url* (same auth/timeout as the SPARQL requests) and parse JSON."""
+        request = urllib.request.Request(url, headers={"Accept": "application/json", **self._headers})
+        try:
+            with urllib.request.urlopen(request, timeout=self.timeout) as response:  # noqa: S310 - URL given by the caller
+                raw = response.read()
+        except urllib.error.HTTPError as exc:
+            raise SparqlError(f"Server returned HTTP {exc.code} for {url}") from exc
+        except (urllib.error.URLError, OSError) as exc:
+            raise SparqlError(f"Could not reach the server at {url}: {exc}") from exc
+        try:
+            return json.loads(raw)
+        except ValueError as exc:
+            raise SparqlError(f"{url} did not return JSON") from exc
+
     def select(self, query: str) -> List[Dict[str, Any]]:
         """Run a SELECT query; returns the JSON result bindings."""
         raw = self._post(self.query_url, "query", query, "application/sparql-results+json")

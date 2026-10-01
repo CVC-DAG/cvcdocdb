@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **`JenaGraph` requires Apache Jena Fuseki >= 6.2.0** (`MIN_FUSEKI_VERSION`).
+  It reads the version from Fuseki's `/$/server` endpoint on connection,
+  before reading any data, and raises `FusekiVersionError` if it is older
+  (these versions lack RDF 1.2) or can't be determined. The version is
+  exposed as `graph.server_version`. Pass `server_url=` if Fuseki is behind
+  a proxy. Behaviour change: another SPARQL 1.2 store is now refused by
+  default; pass `check_fuseki_version=False` to keep using it, at your own
+  risk.
+
+- The PyPI summary now lists every backend: Neo4j, Memgraph, Apache Jena
+  (SPARQL) and NetworkX.
+
+### Fixed
+
+- **`Neo4jGraph` no longer triggers the Neo4j driver's `PreviewWarning`**
+  (driver 5.x, the one installed on Python 3.9). To filter the `id()`
+  deprecation notices, cvcdocdb used the "classifications" notification API,
+  which is a preview feature in driver 5.x: it warned on import and on every
+  session. It now picks the stable API of each driver version: "categories"
+  on 5.x, and "classifications" on 6.x, where "categories" are deprecated.
+  The deprecation filter itself is unchanged.
+- **`Neo4jGraph.close()` now closes the driver session** (also on
+  `MemgraphGraph`). It only closed the driver, so the session stayed open
+  until garbage collection, and the driver warned with a `ResourceWarning`
+  ("unclosed Session") and a `DeprecationWarning` (future drivers won't close
+  sessions on destruction). `close()` is now idempotent.
+
 ## [1.5.0] - 2026-10-01
 
 ### Added
