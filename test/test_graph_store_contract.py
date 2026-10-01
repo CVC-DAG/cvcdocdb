@@ -606,7 +606,6 @@ class TestNeo4jGraph(unittest.TestCase):
             finally:
                 self._graph._tx = None
             self._graph._node_pks.clear()
-            self._graph._closed = False
 
     # -- ON DELETE RESTRICT --
 
@@ -927,7 +926,6 @@ class TestNeo4jGraph(unittest.TestCase):
         self.assertEqual(len(result), 1)
         self.assertEqual(result[0]["label"], "Section")
         self.assertEqual(result[0]["pk"]["section"], "intro")
-        graph.close()
 
     @pytest.mark.slow
     def test_contract_get_subdocuments_nested(self) -> None:
@@ -943,7 +941,6 @@ class TestNeo4jGraph(unittest.TestCase):
         labels = {r["label"] for r in result}
         self.assertIn("Section", labels)
         self.assertIn("Page", labels)
-        graph.close()
 
     @pytest.mark.slow
     def test_contract_get_subdocuments_empty(self) -> None:
@@ -953,7 +950,6 @@ class TestNeo4jGraph(unittest.TestCase):
         graph.insertNode(node, replace=True)
         result = graph.get_subdocuments(node)
         self.assertEqual(result, [])
-        graph.close()
 
     @pytest.mark.slow
     def test_contract_get_subdocuments_no_propagate(self) -> None:
@@ -967,7 +963,6 @@ class TestNeo4jGraph(unittest.TestCase):
         # L'aresta no té _propagate=True → no s'ha de seguir
         result = graph.get_subdocuments(parent)
         self.assertEqual(result, [])
-        graph.close()
 
     @pytest.mark.slow
     def test_contract_get_subdocuments_multiple_children(self) -> None:
@@ -983,7 +978,6 @@ class TestNeo4jGraph(unittest.TestCase):
         self.assertEqual(len(result), 2)
         sections = {r["pk"]["section"] for r in result}
         self.assertEqual(sections, {"intro", "conclusion"})
-        graph.close()
 
     # -- GET DEPENDENCY VALUE (be_value_properties resolution) --
 
