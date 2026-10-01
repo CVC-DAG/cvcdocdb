@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import re
 import threading
+import urllib.parse
 import uuid
 from contextlib import contextmanager
 from typing import Any, Dict, FrozenSet, Iterator, List, Optional, Tuple
@@ -42,7 +43,63 @@ try:  # mateixa excepció que espera NetworkXGraph._guarded_write
 except ImportError:  # pragma: no cover - filelock és una dependència
     _LockTimeout = TimeoutError
 
-__all__ = ["ConcurrentModificationError", "JenaGraph", "SparqlError", "is_sparql", "is_sparql_update"]
+__all__ = [
+    "ConcurrentModificationError",
+    "FusekiVersionError",
+    "JenaGraph",
+    "MIN_FUSEKI_VERSION",
+    "SparqlError",
+    "is_sparql",
+    "is_sparql_update",
+]
+
+#: Oldest Apache Jena Fuseki release JenaGraph supports (RDF 1.2 triple terms
+#: and annotations, SPARQL 1.2 results; the version CI tests against).
+MIN_FUSEKI_VERSION = (6, 2, 0)
+
+
+class FusekiVersionError(SparqlError):
+    """The server isn't Apache Jena Fuseki >= :data:`MIN_FUSEKI_VERSION`, or
+    its version can't be determined."""
+
+
+def _parse_version(text: Any) -> Optional[Tuple[int, int, int]]:
+    """``(major, minor, patch)`` of a Fuseki version string, or ``None``."""
+    match = re.match(r"^\s*(\d+)\.(\d+)(?:\.(\d+))?", str(text))
+    if not match:
+        return None
+    return int(match.group(1)), int(match.group(2)), int(match.group(3) or 0)
+
+
+def _is_supported_version(text: str) -> bool:
+    """Whether *text* is >= MIN_FUSEKI_VERSION. A pre-release of exactly the
+    minimum (e.g. ``6.2.0-rc1``) comes before it and isn't supported; a
+    pre-release of a later version (e.g. ``6.3.0-SNAPSHOT``) is."""
+    version = _parse_version(text)
+    if version is None:
+        return False
+    if version != MIN_FUSEKI_VERSION:
+        return version > MIN_FUSEKI_VERSION
+    return re.match(r"^\s*\d+\.\d+(?:\.\d+)?\s*$", str(text)) is not None
+
+
+def _server_info_urls(url: str, server_url: Optional[str] = None) -> List[str]:
+    """Candidate URLs of Fuseki's ``/$/server`` info endpoint for a dataset URL:
+    the dataset's parent path first, then each ancestor up to the root
+    (dataset names may contain ``/``). *server_url* overrides the guess."""
+    if server_url:
+        return [server_url.rstrip("/") + "/$/server"]
+    parts = urllib.parse.urlsplit(url)
+    segments = [segment for segment in parts.path.split("/") if segment]
+    candidates = []
+    for keep in range(len(segments) - 1, -1, -1):
+        path = "/".join(segments[:keep])
+        candidates.append(urllib.parse.urlunsplit((parts.scheme, parts.netloc, f"/{path}/$/server" if path else "/$/server", "", "")))
+    return candidates
+
+
+def _fetch_server_info(url: str, client: SparqlClient) -> Any:
+    return client.get_json(url)
 
 
 class ConcurrentModificationError(RuntimeError):
@@ -162,8 +219,22 @@ class JenaGraph(NetworkXGraph):
         timeout: Seconds to wait for each HTTP request.
         lock_timeout: Seconds a mutating call waits for another thread of
             this process using the same instance (``None``: forever).
+        server_url: Fuseki's base URL, if it can't be derived from *url*
+            (e.g. behind a proxy); its ``/$/server`` endpoint reports the
+            version.
+        check_fuseki_version: Require Apache Jena Fuseki >=
+            :data:`MIN_FUSEKI_VERSION` (default). Set to ``False`` to use
+            another SPARQL 1.2 store, at your own risk.
+
+    Attributes:
+        server_version: The Fuseki version reported by the server, or
+            ``None`` if it couldn't be determined (only possible with
+            ``check_fuseki_version=False``).
 
     Raises:
+        FusekiVersionError: If the server isn't Fuseki >= 6.2.0, or its
+            version can't be determined (and *check_fuseki_version* is on).
+            Raised before any data is read.
         SparqlError: If the server can't be reached or rejects a request.
     """
 
@@ -179,10 +250,13 @@ class JenaGraph(NetworkXGraph):
         update_url: Optional[str] = None,
         timeout: float = DEFAULT_TIMEOUT,
         lock_timeout: Optional[float] = None,
+        server_url: Optional[str] = None,
+        check_fuseki_version: bool = True,
     ) -> None:
         base = url.rstrip("/")
         self._client = SparqlClient(query_url or f"{base}/query", update_url or f"{base}/update",
                                     user, password, timeout)
+        self.server_version = self._fuseki_version(url, server_url, check_fuseki_version)
         self._mapping = RdfMapping(namespace)
         if graph_iri is not None and any(ch in graph_iri for ch in '<>" {}|\\^`'):
             raise ValueError(f"Invalid graph IRI {graph_iri!r}")
@@ -193,6 +267,36 @@ class JenaGraph(NetworkXGraph):
         # NetworkXGraph.__init__ carrega l'estat (via el _load_state d'aquí).
         super().__init__(persistence_path=f"sparql+{base}", lock_timeout=lock_timeout)
         self._file_lock = _ThreadWriteLock()
+
+    def _fuseki_version(self, url: str, server_url: Optional[str], check: bool) -> Optional[str]:
+        """Read the server version from ``/$/server`` and enforce the minimum."""
+        version: Optional[str] = None
+        failure = ""
+        for candidate in _server_info_urls(url, server_url):
+            try:
+                info = _fetch_server_info(candidate, self._client)
+            except SparqlError as exc:
+                failure = str(exc)
+                continue
+            reported = info.get("version") if isinstance(info, dict) else None
+            if reported is not None and _parse_version(reported) is not None:
+                version = str(reported)
+                break
+            failure = f"{candidate} reported no usable version ({reported!r})"
+        if not check:
+            return version
+        minimum = ".".join(map(str, MIN_FUSEKI_VERSION))
+        if version is None:
+            raise FusekiVersionError(
+                f"JenaGraph requires Apache Jena Fuseki >= {minimum}, but the server version "
+                f"couldn't be determined ({failure}). Pass server_url=... if Fuseki is behind a "
+                "proxy, or check_fuseki_version=False to use another SPARQL 1.2 store at your own risk."
+            )
+        if not _is_supported_version(version):
+            raise FusekiVersionError(
+                f"JenaGraph requires Apache Jena Fuseki >= {minimum}; the server runs {version}."
+            )
+        return version
 
     # -- SPARQL helpers ----------------------------------------------------
 
