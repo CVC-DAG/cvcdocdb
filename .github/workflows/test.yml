@@ -27,7 +27,6 @@ jobs:
         env:
           MEMGRAPH_USER: memgraph
           MEMGRAPH_PASSWORD: testpassword123
-      FUSEKI_URL: http://localhost:3030/ds
         ports:
           - 7688:7687
 
@@ -42,6 +41,7 @@ jobs:
       MEMGRAPH_URL: bolt://localhost:7688
       MEMGRAPH_USER: memgraph
       MEMGRAPH_PASSWORD: testpassword123
+      FUSEKI_URL: http://localhost:3030/ds
 
     steps:
       - name: Checkout
