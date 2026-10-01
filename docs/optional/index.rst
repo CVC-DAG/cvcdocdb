@@ -29,9 +29,15 @@ Each page has its own installation notes, examples, tutorials and API.
    * - :doc:`torch_dataloader`
      - ``[torch]``
      - Stream a graph into PyTorch / PyTorch Geometric
+   * - :doc:`text2query`
+     - as the translator
+     - Natural-language questions on any backend (picks SPARQL or Cypher)
    * - :doc:`text2cypher`
      - ``[graphrag]`` on Neo4j only
      - Natural-language questions translated to Cypher by an LLM
+   * - :doc:`text2sparql`
+     - (none)
+     - Natural-language questions translated to SPARQL (``JenaGraph``)
 
 .. toctree::
    :maxdepth: 1
@@ -41,4 +47,6 @@ Each page has its own installation notes, examples, tutorials and API.
    rdf_schema
    schema_gen
    torch_dataloader
+   text2query
    text2cypher
+   text2sparql

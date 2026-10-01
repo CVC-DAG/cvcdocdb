@@ -7,8 +7,8 @@ or a local Jupyter server.
 
 Tutorials and examples for the core of cvcdocdb. They use only the common
 ``GraphStore`` API, so they work unchanged on every backend (``NetworkXGraph``,
-``Neo4jGraph``, ``MemgraphGraph``): most use ``NetworkXGraph`` because it needs
-no server. Tutorials for the optional modules live with each module in
+``Neo4jGraph``, ``MemgraphGraph``, ``JenaGraph``): most use ``NetworkXGraph``
+because it needs no server. Tutorials for the optional modules live with each module in
 :doc:`../optional/index`.
 
 Getting Started
@@ -38,7 +38,7 @@ Dataset Examples
 
 Each dataset notebook loads the same data into ``NetworkXGraph`` and
 ``Neo4jGraph`` so you can compare them. The loaders in ``cvcdocdb.exemples``
-accept any backend, ``MemgraphGraph`` included (the ``neo4j_*``/``networkx_*``
+accept any backend, ``MemgraphGraph`` and ``JenaGraph`` included (the ``neo4j_*``/``networkx_*``
 module names are historical).
 
 .. toctree::
@@ -89,6 +89,14 @@ Memgraph
 There is no Memgraph-specific example: ``MemgraphGraph`` has the same API and
 behaviour as ``Neo4jGraph``, so every general tutorial runs on it by creating
 the graph with ``MemgraphGraph(url, user, password)`` instead.
+
+Apache Jena
+~~~~~~~~~~~
+
+There is no Jena-specific notebook either: every general tutorial runs on
+``JenaGraph("http://localhost:3030/ds")``. On top of that, the data can be
+queried with SPARQL (see :doc:`../api/jena_graph`) and with
+:doc:`../optional/text2sparql`.
 
 Example scripts (``cvcdocdb.exemples``)
 ---------------------------------------

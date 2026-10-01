@@ -62,6 +62,18 @@ _DEFAULT_MEMGRAPH_URL = f"bolt://localhost:{_DOCKER_MEMGRAPH_HOST_PORT}"
 
 _docker_memgraph_container = None
 
+_DOCKER_FUSEKI_IMAGE = "secoresearch/fuseki:6.2.0"
+_DOCKER_FUSEKI_PORT = 3030
+_DEFAULT_FUSEKI_URL = f"http://localhost:{_DOCKER_FUSEKI_PORT}/ds"
+# Fuseki net (sense la configuració pròpia de la imatge): un dataset TDB2
+# /ds amb consulta i actualització, sense autenticació.
+_FUSEKI_COMMAND = (
+    "mkdir -p /tmp/db /tmp/base && exec java -cp '*:/javalibs/*' "
+    "org.apache.jena.fuseki.main.cmds.FusekiServerCmd --tdb2 --loc /tmp/db --update /ds"
+)
+
+_docker_fuseki_container = None
+
 
 def _bolt_reachable(url: str, timeout: float = 0.5) -> bool:
     """TCP probe of a Bolt URL."""
@@ -69,6 +81,16 @@ def _bolt_reachable(url: str, timeout: float = 0.5) -> bool:
     host, port = parsed.hostname or "localhost", parsed.port or 7687
     try:
         with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except OSError:
+        return False
+
+
+def _fuseki_reachable(timeout: float = 0.5) -> bool:
+    url = os.environ.get("FUSEKI_URL") or _DEFAULT_FUSEKI_URL
+    parsed = urlparse(url)
+    try:
+        with socket.create_connection((parsed.hostname or "localhost", parsed.port or 80), timeout=timeout):
             return True
     except OSError:
         return False
@@ -226,6 +248,50 @@ def _preimport_neo4j_graphrag() -> None:
         pass
 
 
+def _maybe_start_docker_fuseki() -> None:
+    """Start a disposable Apache Jena Fuseki container if nothing answers on
+    ``FUSEKI_URL`` (default http://localhost:3030/ds). Same best-effort policy
+    as the Neo4j/Memgraph ones; on failure the Jena ``slow`` tests skip."""
+    global _docker_fuseki_container
+
+    if _fuseki_reachable():
+        os.environ.setdefault("FUSEKI_URL", _DEFAULT_FUSEKI_URL)
+        return
+    if os.environ.get("FUSEKI_URL") or shutil.which("docker") is None:
+        return
+    try:
+        from testcontainers.core.container import DockerContainer
+        from testcontainers.core.waiting_utils import wait_for_logs
+    except ImportError:
+        return
+
+    os.environ.setdefault("TESTCONTAINERS_RYUK_DISABLED", "true")
+    container = None
+    try:
+        container = (
+            DockerContainer(_DOCKER_FUSEKI_IMAGE)
+            .with_env("FUSEKI_BASE", "/tmp/base")
+            .with_kwargs(entrypoint=["sh", "-c"], working_dir="/jena-fuseki")
+            .with_command([_FUSEKI_COMMAND])
+            .with_bind_ports(_DOCKER_FUSEKI_PORT, _DOCKER_FUSEKI_PORT)
+        )
+        container.start()
+        wait_for_logs(container, "Start Fuseki", timeout=120)
+    except Exception as exc:  # pragma: no cover - environment dependent
+        print(f"[conftest] Could not start local Fuseki docker container: {exc}")
+        if container is not None:
+            try:
+                container.stop()
+            except Exception:
+                pass
+        return
+
+    os.environ.setdefault("FUSEKI_URL", _DEFAULT_FUSEKI_URL)
+    _docker_fuseki_container = container
+    atexit.register(container.stop)
+    print(f"[conftest] Started local Fuseki docker container ({_DOCKER_FUSEKI_IMAGE}) on {_DEFAULT_FUSEKI_URL}")
+
+
 def pytest_configure(config):
     """Register custom markers and (if needed) start a local Neo4j container."""
     _preimport_neo4j_graphrag()
@@ -246,6 +312,7 @@ def pytest_configure(config):
     )
     _maybe_start_docker_neo4j()
     _maybe_start_docker_memgraph()
+    _maybe_start_docker_fuseki()
 
 
 def pytest_collection_modifyitems(config, items):
@@ -280,6 +347,10 @@ def pytest_collection_modifyitems(config, items):
 
     neo4j_ok = _neo4j_reachable()
     memgraph_ok = _memgraph_reachable()
+    fuseki_ok = _fuseki_reachable()
+    skip_fuseki_unreachable = pytest.mark.skip(
+        reason="Fuseki unreachable (no server at FUSEKI_URL) — skipping 'slow' test"
+    )
     skip_memgraph_unreachable = pytest.mark.skip(
         reason="Memgraph unreachable (no server at MEMGRAPH_URL) — skipping 'slow' test"
     )
@@ -308,7 +379,10 @@ def pytest_collection_modifyitems(config, items):
         # test_graph_store_contract.py has individual markers on each method
 
         markers = {m.name for m in item.iter_markers()}
-        if filename == "test_memgraph_graph.py" and "slow" in markers:
+        if filename == "test_jena_graph.py" and "slow" in markers:
+            if not fuseki_ok:
+                item.add_marker(skip_fuseki_unreachable)
+        elif filename == "test_memgraph_graph.py" and "slow" in markers:
             if not memgraph_ok:
                 item.add_marker(skip_memgraph_unreachable)
             elif not neo4j_ok and item.cls is not None and item.cls.__name__ == "MemgraphMatchesNeo4jTest":

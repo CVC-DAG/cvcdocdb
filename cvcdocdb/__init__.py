@@ -38,6 +38,10 @@ def __getattr__(name):
         from .neo4j_graph import Neo4jGraph
 
         return Neo4jGraph
+    if name == "JenaGraph":
+        from .jena_graph import JenaGraph
+
+        return JenaGraph
     if name == "MemgraphGraph":
         from .memgraph_graph import MemgraphGraph
 
@@ -57,6 +61,14 @@ def __getattr__(name):
         from . import drm_entities
 
         return getattr(drm_entities, name)
+    if name in ("Text2SPARQL", "Text2SPARQLResult", "Text2SPARQLError"):
+        from . import text2sparql
+
+        return getattr(text2sparql, name)
+    if name in ("Text2Query", "Text2QueryResult", "Text2QueryError"):
+        from . import text2query
+
+        return getattr(text2query, name)
     if name in ("Text2Cypher", "Text2CypherResult", "Text2CypherError", "CallableLLM"):
         from . import text2cypher
 

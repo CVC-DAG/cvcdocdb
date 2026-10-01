@@ -68,7 +68,18 @@ def _memgraph() -> Optional[Any]:
     return graph
 
 
-BACKENDS: Dict[str, Callable[[], Optional[Any]]] = {"networkx": _networkx, "neo4j": _neo4j, "memgraph": _memgraph}
+def _jena() -> Optional[Any]:
+    url = os.environ.get("FUSEKI_URL")
+    if not url:
+        return None
+    from test.test_jena_graph import _fresh_jena
+
+    return _fresh_jena()
+
+
+BACKENDS: Dict[str, Callable[[], Optional[Any]]] = {
+    "networkx": _networkx, "neo4j": _neo4j, "memgraph": _memgraph, "jena": _jena,
+}
 
 
 def _build_propagation_graph(graph: Any) -> Node:
@@ -141,3 +152,24 @@ class ServerMigrationPropagationTest(MigrationPropagationChecks, unittest.TestCa
 
     def test_memgraph_to_neo4j(self) -> None:
         self.check_pair("memgraph", "neo4j")
+
+    def test_networkx_to_jena(self) -> None:
+        self.check_pair("networkx", "jena")
+
+    def test_jena_to_networkx(self) -> None:
+        self.check_pair("jena", "networkx")
+
+    def test_neo4j_to_jena(self) -> None:
+        self.check_pair("neo4j", "jena")
+
+    def test_jena_to_neo4j(self) -> None:
+        self.check_pair("jena", "neo4j")
+
+    def test_memgraph_to_jena(self) -> None:
+        self.check_pair("memgraph", "jena")
+
+    def test_jena_to_memgraph(self) -> None:
+        self.check_pair("jena", "memgraph")
+
+    def test_jena_to_jena(self) -> None:
+        self.check_pair("jena", "jena")

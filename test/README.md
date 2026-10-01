@@ -98,6 +98,16 @@ not Neo4j is available. `MemgraphMatchesNeo4jTest` runs every propagation
 scenario on both backends and compares the resulting graphs and errors, so it
 needs both.
 
+### Apache Jena tests
+
+`test_jena_graph.py` (and the Jena parts of `test_migration_propagation.py`
+and `test_text2sparql.py`) need an Apache Jena Fuseki dataset with query and
+update at `FUSEKI_URL` (e.g. `http://localhost:3030/ds`). If nothing answers
+there and Docker plus `testcontainers` are available, `conftest.py` starts a
+disposable `secoresearch/fuseki:6.2.0` container on port 3030, with a clean
+TDB2 dataset `/ds`. Each test writes in its own namespace and deletes it
+afterwards.
+
 ### Neo4j Enterprise tests (optional, not run in CI)
 
 CI and the automatic Docker container use **Neo4j Community**, so the
@@ -139,6 +149,9 @@ pytest test/test_neo4j_enterprise.py -m slow
 - `test_optional_drm_entities.py` — `cvcdocdb.drm_entities` isn't imported by `import cvcdocdb`; deprecated top-level access still works
 - `test_propagation_contract.py` — propagation properties of `init_propagation()`/`create_group()` on every backend, NetworkX atomic writes
 - `test_weaknode_hierarchy.py` — WeakNode ancestry on NetworkX, depth limit warning, NetworkX vs Neo4j propagation parity
+- `test_jena_rdf.py` — RDF layout of `JenaGraph` (no server)
+- `test_jena_graph.py` — Jena backend: contract suites, propagation parity with NetworkX, atomic/concurrent writes, SPARQL (needs `FUSEKI_URL`)
+- `test_text2sparql.py` — Text2SPARQL and Text2Query
 - `test_memgraph_graph.py` — Memgraph backend: contract tests, propagation policy, comparison with Neo4j
 - `test_neo4j_enterprise.py` — Community default / opt-in Enterprise mode (Enterprise server tests need `NEO4J_ENTERPRISE_URL`)
 

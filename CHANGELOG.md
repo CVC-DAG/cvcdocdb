@@ -9,6 +9,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Apache Jena backend: `JenaGraph`** (`cvcdocdb.jena_graph`, also
+  `from cvcdocdb import JenaGraph`). It stores the graph as RDF 1.2 in
+  Apache Jena Fuseki or another SPARQL 1.2 store, with the same API and
+  behaviour as every other backend: it reuses the `NetworkXGraph` logic
+  (identical to Neo4j's) on an in-memory copy of the graph.
+  - Every mutating call, or a whole `batch()`, is sent as one atomic SPARQL
+    Update with only the changes. A version stamp detects concurrent writers
+    and raises `ConcurrentModificationError`; nothing is applied.
+  - `query()` runs SPARQL on the server (SPARQL Update is refused), and dict
+    filters and Cypher on the copy.
+  - The RDF layout (`cvcdocdb.jena_rdf`) is queryable directly: label
+    classes, `prop:` values, `rel:` triples with RDF 1.2 annotations for
+    relationship properties. `namespace`/`graph_iri` isolate it from other
+    data, and `clear()` empties it. No extra dependency (HTTP via the
+    standard library, `cvcdocdb.sparql_client`).
+  - The graph has to fit in RAM, and vector indexes are not supported.
+  - Tested with Fuseki 6.2.0: the `GraphStore` contract suite, the
+    propagation contract, the 21 shared propagation scenarios (identical
+    results to NetworkX, hence to Neo4j), and migration to and from every
+    other backend. CI runs a Fuseki container, and `conftest.py` starts one
+    (port 3030) when none is reachable.
+- **`Text2SPARQL`** (`cvcdocdb.text2sparql`): natural-language questions
+  translated to SPARQL by an LLM, for `JenaGraph`, with the same API as
+  `Text2Cypher`. The schema is shown in the graph's RDF vocabulary with its
+  `PREFIX`es. Only read-only queries run (no update operation, no `SERVICE`).
+- **`Text2Query`** (`cvcdocdb.text2query`): one natural-language API for
+  every backend. It uses `Text2SPARQL` on `JenaGraph` and `Text2Cypher`
+  elsewhere, and returns a `Text2QueryResult` (`query`, `language`,
+  `records`). `Text2QueryError` is the new base of `Text2CypherError` and
+  `Text2SPARQLError`. `text2cypher.collect_schema()` exposes the backend-
+  independent schema collection.
+
 - **`GraphStore.set_node_properties(node_id, properties)`** (NetworkX, Neo4j,
   Memgraph). Sets properties on an existing node verbatim
   (`SET n += $props`), including keys that `Node()` can't carry. Raises
@@ -66,6 +98,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   instead. `weak_chain_depth(node)` returns a node's depth.
 
 ### Fixed
+
+- **Cypher write queries on `NetworkXGraph` were never saved.** They changed
+  the graph in memory only, unlike on Neo4j. They are now saved like any
+  other write. Their nodes now get `labels`/`pk`, are indexed (dict filters
+  find them), and no longer get an id that a later `insertNode()` could
+  reuse.
 
 - **`Text2Cypher` didn't work on `MemgraphGraph`.** It treated it as Neo4j:
   `neo4j_graphrag`'s retriever fails on Memgraph (`CALL dbms.components()`
@@ -138,6 +176,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `test/test_weaknode_hierarchy.py` runs the shared propagation scenarios
   (`test/propagation_scenarios.py`) on NetworkX and Neo4j and compares the
   results.
+
+### Changed
+
+- CI: GitHub Actions bumped to their Node 24 releases (`checkout`/
+  `setup-python` v7, `upload-artifact` v7, `download-artifact` v8,
+  `upload-pages-artifact`/`deploy-pages` v5).
 
 ### Documentation
 
