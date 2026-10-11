@@ -202,6 +202,23 @@ serve_viewer(NetworkXGraph(persistence_path="graph.pkl"))  # http://127.0.0.1:87
 The viewer only reads: it accepts GET requests only, validates and caps every
 input, and goes through the store's public API.
 
+### In a Jupyter notebook
+
+`show()` displays the same viewer inside a cell, without starting a server,
+so it also works in VS Code and Colab. It needs the `notebook` extra
+(`pip install 'cvcdocdb[notebook]'`, which installs
+[anywidget](https://anywidget.dev)):
+
+```python
+from cvcdocdb.viewer import show
+
+show(graph, height=650)   # last expression of the cell
+```
+
+The page runs in a sandboxed frame with no network access and asks the
+Python kernel for each piece of data, so the graph is live but needs a
+running kernel: a saved notebook reopened without one shows no data.
+
 ## Example Dataset Loaders (cvcdocdb.exemples)
 
 The package includes ready-to-run loaders for common graph domains. They

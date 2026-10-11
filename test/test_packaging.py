@@ -27,12 +27,14 @@ EXTRAS = {
     "vector": {"hnswlib"},
     "torch": {"torch", "torch-geometric"},
     "graphrag": {"neo4j-graphrag"},
+    "notebook": {"anywidget"},
 }
 # Files the graph viewer (cvcdocdb.viewer) serves.
 VIEWER_STATIC_FILES = (
     "index.html",
     "viewer.js",
     "viewer.css",
+    "widget.js",
     "vendor/cytoscape.min.js",
     "vendor/cytoscape.LICENSE.txt",
 )

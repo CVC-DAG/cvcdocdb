@@ -24,6 +24,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   queries). The page works offline with a vendored cytoscape.js 3.30.2
   (MIT, license shipped next to it). Additive: no existing API changes and no
   new mandatory dependencies.
+- **Graph viewer in Jupyter notebooks: `cvcdocdb.viewer.show(store)`.** The
+  same viewer as an [anywidget](https://anywidget.dev) widget
+  (`GraphViewerWidget`), with no HTTP server, so it works in JupyterLab,
+  Notebook 7, VS Code and Colab. The page runs in a sandboxed `iframe` with no
+  network access and asks the kernel for data through the widget; the kernel
+  answers with the same read-only API as the server (request routing now
+  shared in `cvcdocdb.viewer.api`). Needs the new optional extra
+  `pip install 'cvcdocdb[notebook]'`; `cvcdocdb.viewer` still imports without
+  it.
 
 ## [1.6.0] - 2026-10-02
 

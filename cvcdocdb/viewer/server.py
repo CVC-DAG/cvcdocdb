@@ -26,16 +26,16 @@ from __future__ import annotations
 import hmac
 import json
 import logging
-import re
 import socket
 import webbrowser
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib import resources
-from typing import Any, Dict, List, Optional, Tuple, Union
-from urllib.parse import parse_qs, unquote, urlsplit
+from typing import Any, Dict, List, Optional, Union
+from urllib.parse import parse_qs, urlsplit
 
 from ..graph_store import GraphStore
+from .api import UnknownEndpoint, handle_api
 from .data import GraphViewerData, InvalidRequest, NodeNotFound
 
 __all__ = ["DEFAULT_HOST", "DEFAULT_PORT", "ViewerServer", "create_server", "serve_viewer"]
@@ -53,8 +53,6 @@ _STATIC_FILES = {
     "vendor/cytoscape.min.js": "text/javascript; charset=utf-8",
     "vendor/cytoscape.LICENSE.txt": "text/plain; charset=utf-8",
 }
-_NODE_RE = re.compile(r"^/api/nodes/([^/]+)$")
-_NEIGHBOURS_RE = re.compile(r"^/api/nodes/([^/]+)/neighbours$")
 _SECURITY_HEADERS = {
     "X-Content-Type-Options": "nosniff",
     "Referrer-Policy": "no-referrer",
@@ -77,43 +75,6 @@ class _HttpError(Exception):
         super().__init__(message)
         self.status = status
         self.message = message
-
-
-def _single(query: Dict[str, List[str]], name: str) -> Optional[str]:
-    values = query.get(name)
-    if not values:
-        return None
-    if len(values) > 1:
-        raise InvalidRequest(f"Parameter {name!r} given more than once")
-    return values[0]
-
-
-def _int_param(query: Dict[str, List[str]], name: str, default: int) -> int:
-    raw = _single(query, name)
-    if raw is None or raw == "":
-        return default
-    try:
-        return int(raw)
-    except ValueError:
-        raise InvalidRequest(f"Parameter {name!r} must be an integer") from None
-
-
-def _parse_node_id(raw: str) -> int:
-    try:
-        return int(unquote(raw))
-    except ValueError:
-        raise InvalidRequest("Node id must be an integer") from None
-
-
-def _parse_filters(values: List[str]) -> List[Tuple[str, str, str]]:
-    filters = []
-    for raw in values:
-        parts = raw.split(":", 2)
-        if len(parts) < 2:
-            raise InvalidRequest("Filters look like property:operator:value")
-        prop, op = parts[0], parts[1]
-        filters.append((prop, op, parts[2] if len(parts) == 3 else ""))
-    return filters
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -215,31 +176,10 @@ class _Handler(BaseHTTPRequestHandler):
         raise _HttpError(HTTPStatus.NOT_FOUND, "Not found")
 
     def _api(self, path: str, query: Dict[str, List[str]]) -> Any:
-        data = self.server.data
-        if path == "/api/summary":
-            return data.summary()
-        if path == "/api/nodes":
-            label = _single(query, "label")
-            return data.search(
-                label=label or None,
-                filters=_parse_filters(query.get("f", [])),
-                text=_single(query, "q"),
-                offset=_int_param(query, "offset", 0),
-                limit=_int_param(query, "limit", 50),
-            )
-        match = _NEIGHBOURS_RE.match(path)
-        if match:
-            node_id = _parse_node_id(match.group(1))
-            return data.neighbours(
-                node_id,
-                direction=_single(query, "direction") or "both",
-                relation_type=_single(query, "type") or None,
-                limit=_int_param(query, "limit", 50),
-            )
-        match = _NODE_RE.match(path)
-        if match:
-            return data.node(_parse_node_id(match.group(1)))
-        raise _HttpError(HTTPStatus.NOT_FOUND, "Unknown API endpoint")
+        try:
+            return handle_api(self.server.data, path, query)
+        except UnknownEndpoint:
+            raise _HttpError(HTTPStatus.NOT_FOUND, "Unknown API endpoint") from None
 
 
 class ViewerServer(ThreadingHTTPServer):

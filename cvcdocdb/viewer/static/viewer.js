@@ -91,11 +91,45 @@
     banner.hidden = false;
   }
 
-  function api(path, params) {
-    var url = new URL(path, window.location.href);
-    (params || []).forEach(function (pair) {
-      if (pair[1] !== null && pair[1] !== undefined && pair[1] !== "") url.searchParams.append(pair[0], pair[1]);
+  // In the notebook widget (cvcdocdb/viewer/notebook.py) the page has no
+  // server: it asks its parent window, which relays to the Python kernel.
+  var BRIDGE = window.CVCDOCDB_BRIDGE === true;
+  var BRIDGE_TIMEOUT_MS = 30000;
+  var pending = {};
+  var nextRequestId = 1;
+
+  if (BRIDGE) {
+    window.addEventListener("message", function (event) {
+      if (event.source !== window.parent) return;
+      var msg = event.data;
+      if (!msg || msg.type !== "cvcdocdb-api" || !pending[msg.id]) return;
+      var request = pending[msg.id];
+      delete pending[msg.id];
+      clearTimeout(request.timer);
+      if (msg.ok) request.resolve(msg.body);
+      else request.reject(new Error(msg.body && msg.body.error ? msg.body.error : "Request failed"));
     });
+  }
+
+  function bridgeRequest(path, pairs) {
+    return new Promise(function (resolve, reject) {
+      var id = nextRequestId++;
+      var timer = setTimeout(function () {
+        delete pending[id];
+        reject(new Error("No answer from the Python kernel: is it still running?"));
+      }, BRIDGE_TIMEOUT_MS);
+      pending[id] = { resolve: resolve, reject: reject, timer: timer };
+      window.parent.postMessage({ type: "cvcdocdb-api", id: id, path: path, params: pairs }, "*");
+    });
+  }
+
+  function api(path, params) {
+    var pairs = (params || []).filter(function (pair) {
+      return pair[1] !== null && pair[1] !== undefined && pair[1] !== "";
+    }).map(function (pair) { return [pair[0], String(pair[1])]; });
+    if (BRIDGE) return bridgeRequest(path, pairs);
+    var url = new URL(path, window.location.href);
+    pairs.forEach(function (pair) { url.searchParams.append(pair[0], pair[1]); });
     var headers = { "Accept": "application/json" };
     if (token) headers["Authorization"] = "Bearer " + token;
     return fetch(url.pathname + url.search, { headers: headers, credentials: "same-origin" })

@@ -43,6 +43,8 @@ EXTRAS_REQUIRE = {
     "torch": ["torch", "torch_geometric"],
     # Natural-language → Cypher (cvcdocdb.text2cypher); needs Python >= 3.10.
     "graphrag": ["neo4j-graphrag>=1.21,<2"],
+    # The graph viewer as a Jupyter widget (cvcdocdb.viewer.show).
+    "notebook": ["anywidget>=0.9"],
 }
 
 
