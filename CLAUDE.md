@@ -96,6 +96,7 @@ If there are staged or unstaged changes, ask the user for the date they were mad
 ### Testing
 - Run all tests: `python -m pytest test/ -v`
 - Run a single test file: `python -m pytest test/<test_file_name>.py`
+- Run only the tests for the files changed against `HEAD` (committed or not, plus untracked): `python -m pytest test/ --changed` (or `--changed=develop` for everything changed on the branch). Changes to core modules (`base.py`, `graph_store.py`, `__init__.py`), test infrastructure or unmapped files run the whole suite. The mapping rules are in `test/changed_selection.py` and `test/README.md`. Run the full suite before merging.
 
 ### Documentation
 - Generate HTML documentation with Sphinx:
