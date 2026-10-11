@@ -369,3 +369,44 @@ def test_relations_among_rejects_bad_ids(data, ids):
 def test_max_relations_must_be_positive(store):
     with pytest.raises(ValueError):
         GraphViewerData(store, max_relations=0)
+
+
+# ----------------------------------------------------------------------
+# Several labels at once (the page filters by one or more node types)
+# ----------------------------------------------------------------------
+
+
+def test_search_by_several_labels(data):
+    result = data.search(labels=["Person", "City"])
+    assert result["total"] == 5
+    assert {item["main_label"] for item in result["items"]} == {"Person", "City"}
+
+
+def test_search_label_and_labels_are_combined(data):
+    result = data.search(label="City", labels=["Person"])
+    assert {item["main_label"] for item in result["items"]} == {"Person", "City"}
+
+
+def test_search_several_labels_with_filters_and_text(data):
+    result = data.search(labels=["Person", "City"], text="barcelona")
+    names = {item["properties"]["name"] for item in result["items"]}
+    assert names == {"Alice", "Barcelona"}  # Alice's bio mentions Barcelona
+    result = data.search(labels=["Person", "City"], filters=[("name", "eq", "Girona")])
+    assert [item["properties"]["name"] for item in result["items"]] == ["Girona"]
+
+
+def test_search_several_labels_pages_over_all_of_them(data):
+    first = data.search(labels=["Person", "City"], limit=3)
+    second = data.search(labels=["Person", "City"], offset=3, limit=3)
+    ids = [item["id"] for item in first["items"] + second["items"]]
+    assert len(ids) == 5 and len(set(ids)) == 5
+
+
+def test_search_several_labels_repeated_is_harmless(data):
+    assert data.search(labels=["Person", "Person"])["total"] == 3
+
+
+@pytest.mark.parametrize("labels", [["Person", "bad label"], ["X"] * 100])
+def test_search_rejects_bad_or_too_many_labels(data, labels):
+    with pytest.raises(InvalidRequest):
+        data.search(labels=labels)

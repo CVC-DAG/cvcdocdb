@@ -87,3 +87,8 @@ def test_extra_css_is_added_after_the_viewer_styles():
 def test_extra_css_cannot_break_out_of_its_style_element(css):
     with pytest.raises(ValueError):
         build_page(extra_css=css)
+
+
+def test_page_has_the_level_of_detail_toggle():
+    page = build_page(layout="light")
+    assert 'id="lod-toggle"' in page and "applyLevelOfDetail" in page
