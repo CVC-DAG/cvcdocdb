@@ -10,6 +10,7 @@ Routes (``GET`` only — anything else gets ``405``):
 * ``/api/nodes/<id>`` — :meth:`GraphViewerData.node`.
 * ``/api/nodes/<id>/neighbours?direction=&type=&limit=`` —
   :meth:`GraphViewerData.neighbours`.
+* ``/api/relations?ids=<id>&ids=<id>...`` — :meth:`GraphViewerData.relations_among`.
 
 When a *token* is configured, every ``/api`` request must carry it as
 ``?token=`` or ``Authorization: Bearer <token>`` (``401`` otherwise). The
@@ -37,6 +38,7 @@ from urllib.parse import parse_qs, urlsplit
 from ..graph_store import GraphStore
 from .api import UnknownEndpoint, handle_api
 from .data import GraphViewerData, InvalidRequest, NodeNotFound
+from .page import with_options
 
 __all__ = ["DEFAULT_HOST", "DEFAULT_PORT", "ViewerServer", "create_server", "serve_viewer"]
 
@@ -164,7 +166,7 @@ class _Handler(BaseHTTPRequestHandler):
 
     def _static(self, path: str) -> None:
         if path in ("/", "/index.html"):
-            self._send(HTTPStatus.OK, _static_bytes("index.html"), "text/html; charset=utf-8")
+            self._send(HTTPStatus.OK, self.server.page, "text/html; charset=utf-8")
             return
         if path.startswith("/static/"):
             name = path[len("/static/"):]
@@ -187,9 +189,13 @@ class ViewerServer(ThreadingHTTPServer):
 
     daemon_threads = True
 
-    def __init__(self, data: GraphViewerData, host: str, port: int, token: Optional[str]) -> None:
+    def __init__(self, data: GraphViewerData, host: str, port: int, token: Optional[str],
+                 layout: str = "classic", load_all: bool = False, accent: Optional[str] = None,
+                 extra_css: Optional[str] = None) -> None:
         self.data = data
         self.token = token or None
+        self.page = with_options(_static_bytes("index.html").decode("utf-8"), layout=layout,
+                                 load_all=load_all, accent=accent, extra_css=extra_css).encode("utf-8")
         self.restrict_host = host in _LOOPBACK_HOSTS
         self.allowed_hosts = set(_LOOPBACK_HOSTS) | {host.lower()}
         if ":" in host:
@@ -210,6 +216,10 @@ def create_server(
     host: str = DEFAULT_HOST,
     port: int = DEFAULT_PORT,
     token: Optional[str] = None,
+    layout: str = "classic",
+    load_all: bool = False,
+    accent: Optional[str] = None,
+    extra_css: Optional[str] = None,
 ) -> ViewerServer:
     """Build (but don't start) the viewer server for *store*.
 
@@ -220,6 +230,10 @@ def create_server(
             else exposes the data to the network — set a *token*.
         port: TCP port; ``0`` picks a free one.
         token: If set, required by every ``/api`` request.
+        layout: ``"classic"`` or ``"light"`` (graph first; see :mod:`cvcdocdb.viewer.page`).
+        load_all: Draw the whole graph on start (up to 300 nodes).
+        accent: Accent colour of the page, ``#RGB`` or ``#RRGGBB``.
+        extra_css: A stylesheet added after the viewer's own (your look).
 
     Returns:
         A :class:`ViewerServer`; call ``serve_forever()`` to run it.
@@ -227,7 +241,8 @@ def create_server(
     data = store if isinstance(store, GraphViewerData) else GraphViewerData(store)
     if host not in _LOOPBACK_HOSTS and not token:
         logger.warning("Graph viewer bound to %s without a token: anyone who can reach it can read the graph", host)
-    return ViewerServer(data, host, port, token)
+    return ViewerServer(data, host, port, token, layout=layout, load_all=load_all, accent=accent,
+                        extra_css=extra_css)
 
 
 def serve_viewer(
@@ -236,6 +251,10 @@ def serve_viewer(
     port: int = DEFAULT_PORT,
     token: Optional[str] = None,
     open_browser: bool = False,
+    layout: str = "classic",
+    load_all: bool = False,
+    accent: Optional[str] = None,
+    extra_css: Optional[str] = None,
 ) -> None:
     """Serve the read-only viewer for *store* until interrupted (Ctrl+C).
 
@@ -245,10 +264,12 @@ def serve_viewer(
         port: TCP port (default 8765); ``0`` picks a free one.
         token: If set, required by every ``/api`` request.
         open_browser: Open the page in the default browser.
+        layout, load_all, accent, extra_css: Page options (see :func:`create_server`).
 
     The store is not closed on exit: it belongs to the caller.
     """
-    server = create_server(store, host=host, port=port, token=token)
+    server = create_server(store, host=host, port=port, token=token, layout=layout, load_all=load_all,
+                           accent=accent, extra_css=extra_css)
     print(f"cvcdocdb graph viewer: {server.url}  (Ctrl+C to stop)", flush=True)
     if open_browser:
         webbrowser.open(server.url)

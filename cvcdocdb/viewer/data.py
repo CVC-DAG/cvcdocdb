@@ -47,6 +47,10 @@ DEFAULT_MAX_SCAN = 5000
 #: Default and maximum number of relations returned for one node.
 DEFAULT_NEIGHBOURS = 50
 DEFAULT_MAX_NEIGHBOURS = 500
+#: Default cap on the relations :meth:`GraphViewerData.relations_among` returns.
+DEFAULT_MAX_RELATIONS = 2000
+#: Most node ids one :meth:`GraphViewerData.relations_among` call accepts.
+MAX_RELATION_IDS = 1000
 #: Input limits.
 MAX_FILTERS = 20
 MAX_TEXT_LENGTH = 200
@@ -71,6 +75,10 @@ _DIRECTIONS = ("both", "out", "in")
 _COUNT_LABELS = "MATCH (n) RETURN labels(n) AS labels, count(*) AS c"
 _COUNT_RELATIONS = "MATCH ()-[r]->() RETURN type(r) AS type, count(*) AS c"
 _NODE_DETAIL = "MATCH (n) WHERE id(n) = $id RETURN labels(n) AS labels, properties(n) AS props"
+_RELATIONS_AMONG = (
+    "MATCH (n)-[r]->(m) WHERE id(n) IN $ids AND id(m) IN $ids "
+    "RETURN id(n) AS source, type(r) AS type, id(m) AS target, properties(r) AS rprops LIMIT $limit"
+)
 _NEIGHBOURS = {
     "out": "MATCH (n)-[r]->(m) WHERE id(n) = $id{type_clause} "
            "RETURN type(r) AS type, properties(r) AS rprops, id(m) AS mid, "
@@ -222,6 +230,7 @@ class GraphViewerData:
         max_scan: Most nodes one :meth:`search` reads from the store; the
             total it reports is a lower bound past this.
         max_neighbours: Most relations :meth:`neighbours` returns.
+        max_relations: Most relations :meth:`relations_among` returns.
     """
 
     def __init__(
@@ -230,15 +239,17 @@ class GraphViewerData:
         max_page_size: int = DEFAULT_MAX_PAGE_SIZE,
         max_scan: int = DEFAULT_MAX_SCAN,
         max_neighbours: int = DEFAULT_MAX_NEIGHBOURS,
+        max_relations: int = DEFAULT_MAX_RELATIONS,
     ) -> None:
         for name, value in (("max_page_size", max_page_size), ("max_scan", max_scan),
-                            ("max_neighbours", max_neighbours)):
+                            ("max_neighbours", max_neighbours), ("max_relations", max_relations)):
             if isinstance(value, bool) or not isinstance(value, int) or value < 1:
                 raise ValueError(f"{name} must be a positive integer")
         self.store = store
         self.max_page_size = max_page_size
         self.max_scan = max_scan
         self.max_neighbours = max_neighbours
+        self.max_relations = max_relations
         self._lock = threading.Lock()
 
     # -- store access ----------------------------------------------------
@@ -479,3 +490,39 @@ class GraphViewerData:
             if truncated:
                 break
         return {"node": node, "relations": relations, "truncated": truncated}
+
+    def relations_among(self, node_ids: Sequence[int]) -> Dict[str, Any]:
+        """The relations whose two ends are both in *node_ids*, in one query.
+
+        Lets a client draw the edges of a whole canvas without asking for the
+        neighbours of every node.
+
+        Args:
+            node_ids: Node ids (at most :data:`MAX_RELATION_IDS`); unknown ids
+                are ignored.
+
+        Returns:
+            A dict with ``relations`` (each with ``type``, ``source``,
+            ``target`` and ``properties``) and ``truncated``, true when there
+            were more than ``max_relations``.
+
+        Raises:
+            InvalidRequest: On a non-integer id or too many ids.
+        """
+        if len(node_ids) > MAX_RELATION_IDS:
+            raise InvalidRequest(f"At most {MAX_RELATION_IDS} node ids are allowed")
+        ids = sorted({_node_id(node_id) for node_id in node_ids})
+        if not ids:
+            return {"relations": [], "truncated": False}
+        rows = self._cypher(_RELATIONS_AMONG, {"ids": ids, "limit": self.max_relations + 1})
+        relations = [
+            {
+                "type": str(row.get("type")),
+                "source": row.get("source"),
+                "target": row.get("target"),
+                "properties": {k: _jsonable(v, SUMMARY_STRING_LENGTH)
+                               for k, v in sorted((row.get("rprops") or {}).items())},
+            }
+            for row in rows[: self.max_relations]
+        ]
+        return {"relations": relations, "truncated": len(rows) > self.max_relations}

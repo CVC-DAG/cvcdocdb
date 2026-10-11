@@ -246,8 +246,15 @@ td.props b { color: var(--text); font-weight: 500; }
 }
 #cy { min-height: 240px; min-width: 0; }
 
-.detail {
+.detail-drawer {
   border-left: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+}
+.detail {
+  flex: 1;
   padding: 10px;
   overflow: auto;
   font-size: 13px;
@@ -269,6 +276,46 @@ td.props b { color: var(--text); font-weight: 500; }
   .results-panel { max-height: 70vh; }
   .graph-and-detail { grid-template-columns: 1fr; }
   #cy { height: 60vh; }
-  .detail { border-left: none; border-top: 1px solid var(--border); }
+  .detail-drawer { border-left: none; border-top: 1px solid var(--border); }
   .filter-form { margin-left: 0; }
+}
+
+/* Light layout (<html data-layout="light">): graph first. The table opens on
+   demand, node details slide in over the canvas, and there is less chrome. */
+.light-only { display: none; }
+:root[data-layout="light"] .light-only { display: inline-flex; }
+:root[data-layout="light"] #toggle-table[aria-expanded="true"] { background: var(--chip); border-color: var(--accent); }
+:root[data-layout="light"] button { padding: 3px 8px; font-size: 13px; }
+:root[data-layout="light"] .topbar { padding: 4px 12px; gap: 10px; }
+:root[data-layout="light"] .topbar h1 { display: none; }
+:root[data-layout="light"] .read-only-badge { font-size: 11px; padding: 1px 8px; }
+:root[data-layout="light"] .layout { grid-template-columns: 200px 1fr; }
+:root[data-layout="light"] .sidebar { background: transparent; padding: 10px; gap: 12px; }
+:root[data-layout="light"] .section-title { text-transform: none; letter-spacing: 0; }
+:root[data-layout="light"] .hint { display: none; }
+:root[data-layout="light"] .main { grid-template-rows: 1fr; gap: 8px; padding: 8px; }
+:root[data-layout="light"] .results-panel { display: none; }
+:root[data-layout="light"] body.table-open .main { grid-template-rows: minmax(160px, 35%) 1fr; }
+:root[data-layout="light"] body.table-open .results-panel { display: flex; }
+:root[data-layout="light"] .panel { border-radius: 6px; }
+:root[data-layout="light"] .graph-toolbar { padding: 4px 6px; gap: 6px; }
+:root[data-layout="light"] .graph-and-detail { grid-template-columns: 1fr; position: relative; }
+:root[data-layout="light"] .detail-drawer {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(320px, 85%);
+  background: var(--panel);
+  box-shadow: -4px 0 12px rgba(0, 0, 0, 0.08);
+  transform: translateX(100%);
+  visibility: hidden;
+  transition: transform 0.15s ease-out, visibility 0.15s;
+}
+:root[data-layout="light"] body.detail-open .detail-drawer { transform: none; visibility: visible; }
+:root[data-layout="light"] .detail { padding-top: 34px; }
+:root[data-layout="light"] .detail-close { position: absolute; top: 6px; right: 6px; }
+@media (max-width: 860px) {
+  :root[data-layout="light"] .layout { grid-template-columns: 1fr; }
+  :root[data-layout="light"] .detail-drawer { border-top: none; }
 }

@@ -49,8 +49,8 @@ def test_cli_opens_a_networkx_pickle(tmp_path, monkeypatch):
 
     calls = {}
 
-    def fake_serve(store, host, port, token, open_browser):
-        calls.update(store=store, host=host, port=port, token=token, open_browser=open_browser)
+    def fake_serve(store, host, port, token, open_browser, **options):
+        calls.update(store=store, host=host, port=port, token=token, open_browser=open_browser, options=options)
         calls["labels"] = [e["label"] for e in GraphViewerData(store).summary()["labels"]]
 
     monkeypatch.setattr(cli, "serve_viewer", fake_serve)
@@ -60,6 +60,7 @@ def test_cli_opens_a_networkx_pickle(tmp_path, monkeypatch):
     assert calls["token"] is None
     assert calls["open_browser"] is False
     assert calls["labels"] == ["Person"]
+    assert calls["options"] == {"layout": "classic", "load_all": False, "accent": None, "extra_css": None}
 
 
 def test_cli_missing_pickle_is_an_error(tmp_path, capsys):
@@ -108,3 +109,21 @@ def test_cli_builds_remote_backend_with_password_from_env(monkeypatch):
               "--database", "abc", "--no-browser"])
     assert created == {"url": "bolt://db:7687", "user": "neo4j", "password": "pw",
                        "database": "abc", "closed": True}
+
+
+def test_cli_page_options(tmp_path, monkeypatch):
+    path = tmp_path / "graph.pkl"
+    NetworkXGraph(persistence_path=str(path)).insertNode(Node(pk={"id": 1}, main_label="Person"))
+    css = tmp_path / "host.css"
+    css.write_text("body { font-family: serif; }", encoding="utf-8")
+    seen = {}
+    monkeypatch.setattr(cli, "serve_viewer", lambda store, **kw: seen.update(kw))
+    argv = [str(path), "--no-browser", "--layout", "light", "--load-all", "--accent", "#00843D", "--css", str(css)]
+    assert cli.main(argv) == 0
+    assert (seen["layout"], seen["load_all"], seen["accent"]) == ("light", True, "#00843D")
+    assert seen["extra_css"] == "body { font-family: serif; }"
+
+
+def test_cli_rejects_unknown_layout(tmp_path, capsys):
+    with pytest.raises(SystemExit):
+        cli.main([str(tmp_path / "x.pkl"), "--layout", "fancy"])

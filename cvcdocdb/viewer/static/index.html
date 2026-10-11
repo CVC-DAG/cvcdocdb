@@ -82,6 +82,7 @@
 
       <section class="panel graph-panel">
         <div class="graph-toolbar">
+          <button id="toggle-table" type="button" class="secondary light-only" aria-expanded="false" title="Show the search results as a table">Table</button>
           <button id="graph-refresh" type="button" class="secondary" title="Read the graph store again">Refresh</button>
           <button id="graph-fit" type="button" class="secondary">Fit</button>
           <button id="graph-layout" type="button" class="secondary">Re-layout</button>
@@ -98,8 +99,11 @@
         <div id="graph-notice" class="banner warn" hidden></div>
         <div class="graph-and-detail">
           <div id="cy" aria-label="Graph canvas"></div>
-          <div id="detail" class="detail">
-            <p class="muted">Click a node in the graph or a row in the table to see its properties.</p>
+          <div id="detail-drawer" class="detail-drawer">
+            <button id="detail-close" type="button" class="secondary light-only detail-close" aria-label="Close the details">×</button>
+            <div id="detail" class="detail">
+              <p class="muted">Click a node in the graph or a row in the table to see its properties.</p>
+            </div>
           </div>
         </div>
       </section>

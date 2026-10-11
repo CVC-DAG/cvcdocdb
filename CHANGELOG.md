@@ -51,6 +51,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the Jena one queries the RDF in SPARQL, RDF 1.2 reifiers included, and the
   in-memory copy in Cypher. The dataset notebooks also load their data into
   `MemgraphGraph` and `JenaGraph`.
+- **Lighter viewer: `layout="light"`, host styling and one-request canvas.**
+  A graph-first layout (`build_page(layout="light")`, `create_server(...,
+  layout="light")`, `--layout light`): the graph fills the page, the results
+  table opens on demand, node details slide in over the canvas, relation names
+  show only on the selected node's edges, and there is less chrome. The page
+  also takes an `accent` colour (`--accent '#00843D'`) and an `extra_css`
+  stylesheet added after its own (`--css FILE`), so a host application can
+  give it its look; both are validated (no way to leave the `<style>`
+  element). Drawing the whole graph (`load_all`) now asks for every edge in a
+  single `GET /api/relations?ids=...` (`GraphViewerData.relations_among()`,
+  capped by the new `max_relations`) instead of one neighbours request per
+  node. `cvcdocdb.viewer.page.build_page()` (also `cvcdocdb.viewer.build_page`)
+  builds the self-contained bridge page without anywidget, for hosts that
+  embed the viewer in a sandboxed `iframe` and relay its requests to their own
+  API with `handle_api`; `cvcdocdb.viewer.notebook.build_page` is the same
+  function. All additive: the default page and every existing call are
+  unchanged.
 
 ### Fixed
 

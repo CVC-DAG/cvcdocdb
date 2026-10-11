@@ -202,6 +202,29 @@ serve_viewer(NetworkXGraph(persistence_path="graph.pkl"))  # http://127.0.0.1:87
 The viewer only reads: it accepts GET requests only, validates and caps every
 input, and goes through the store's public API.
 
+### Lighter layout and your own look
+
+`--layout light` (or `layout="light"` in `serve_viewer`/`create_server`/
+`build_page`) puts the graph first: the table opens with the **Table**
+button or when you pick a label or search, node details slide in over the
+canvas, and relation names only show on the selected node's edges.
+`--load-all` draws the whole graph on start (one request for all its edges),
+`--accent '#00843D'` sets the accent colour and `--css FILE` adds a
+stylesheet after the viewer's own, e.g. to use your application's fonts and
+colours (the page uses CSS variables such as `--bg`, `--panel`, `--text`,
+`--border`):
+
+```bash
+python -m cvcdocdb.viewer graph.pkl --layout light --load-all --accent '#00843D' --css my-app.css
+```
+
+To embed the viewer in your own web application, build the self-contained
+page with `cvcdocdb.viewer.build_page(layout="light", extra_css=...)`, show it
+in an `<iframe sandbox="allow-scripts" srcdoc=...>`, and relay its
+`postMessage` requests (`{type: "cvcdocdb-api", id, path, params}`) to your
+own access-controlled endpoint, which answers with
+`cvcdocdb.viewer.api.handle_api(GraphViewerData(store), path, query)`.
+
 ### In a Jupyter notebook
 
 `show()` displays the same viewer inside a cell, without starting a server,

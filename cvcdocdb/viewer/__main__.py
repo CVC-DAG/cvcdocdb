@@ -13,7 +13,9 @@ for; Jena/Memgraph may need none)::
 
 Common options: ``--host`` (default 127.0.0.1), ``--port`` (default 8765,
 0 = any free port), ``--token`` (or ``CVCDOCDB_VIEWER_TOKEN``) to require a
-token on the API, ``--no-browser`` not to open the page.
+token on the API, ``--no-browser`` not to open the page. Page look:
+``--layout light`` (graph first), ``--load-all``, ``--accent '#RRGGBB'`` and
+``--css FILE`` (a stylesheet added after the viewer's own).
 """
 
 from __future__ import annotations
@@ -24,6 +26,7 @@ import os
 import sys
 from typing import Any, List, Optional
 
+from .page import LAYOUTS
 from .server import DEFAULT_HOST, DEFAULT_PORT, serve_viewer
 
 PASSWORD_ENV = "CVCDOCDB_PASSWORD"
@@ -60,6 +63,10 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--port", type=int, default=DEFAULT_PORT, help=f"Port (default {DEFAULT_PORT}; 0 = any)")
     parser.add_argument("--token", help=f"Token required by the API (default: ${TOKEN_ENV}, if set)")
     parser.add_argument("--no-browser", action="store_true", help="Don't open the page in a browser")
+    parser.add_argument("--layout", choices=LAYOUTS, default="classic", help="Page layout (light: graph first)")
+    parser.add_argument("--load-all", action="store_true", help="Draw the whole graph on start (up to 300 nodes)")
+    parser.add_argument("--accent", help="Accent colour of the page, e.g. '#00843D'")
+    parser.add_argument("--css", metavar="FILE", help="Stylesheet added after the viewer's own")
     return parser
 
 
@@ -91,10 +98,18 @@ def main(argv: Optional[List[str]] = None) -> int:
     """Run the viewer; returns the process exit code."""
     parser = _parser()
     args = parser.parse_args(argv)
+    extra_css = None
+    if args.css:
+        try:
+            with open(args.css, encoding="utf-8") as css_file:
+                extra_css = css_file.read()
+        except OSError as exc:
+            parser.error(f"can't read --css file: {exc}")
     store = _open_store(args, parser)
     token = args.token if args.token is not None else os.environ.get(TOKEN_ENV) or None
     try:
-        serve_viewer(store, host=args.host, port=args.port, token=token, open_browser=not args.no_browser)
+        serve_viewer(store, host=args.host, port=args.port, token=token, open_browser=not args.no_browser,
+                     layout=args.layout, load_all=args.load_all, accent=args.accent, extra_css=extra_css)
     finally:
         store.close()
     return 0

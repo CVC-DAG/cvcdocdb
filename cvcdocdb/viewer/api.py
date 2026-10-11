@@ -79,6 +79,8 @@ def handle_api(data: GraphViewerData, path: str, query: Dict[str, List[str]]) ->
             offset=_int_param(query, "offset", 0),
             limit=_int_param(query, "limit", 50),
         )
+    if path == "/api/relations":
+        return data.relations_among([_parse_node_id(raw) for raw in query.get("ids", [])])
     match = _NEIGHBOURS_RE.match(path)
     if match:
         node_id = _parse_node_id(match.group(1))

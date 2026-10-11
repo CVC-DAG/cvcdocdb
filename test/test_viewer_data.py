@@ -325,3 +325,47 @@ def test_viewer_never_writes(store, tmp_path):
         data.node(item["id"])
         data.neighbours(item["id"])
     assert (sorted(store.get_node_ids()), sorted(store.get_edges())) == before
+
+
+# ----------------------------------------------------------------------
+# Relations among a set of nodes (one query for a whole canvas)
+# ----------------------------------------------------------------------
+
+
+def test_relations_among_returns_only_relations_between_the_given_nodes(data):
+    alice, bob, carol = (_id_of(data, "Person", n) for n in ("Alice", "Bob", "Carol"))
+    bcn = _id_of(data, "City", "Barcelona")
+    result = data.relations_among([alice, bob, bcn])
+    found = {(r["source"], r["type"], r["target"]) for r in result["relations"]}
+    assert found == {(alice, "KNOWS", bob), (alice, "LIVES_IN", bcn)}
+    assert result["truncated"] is False
+    assert carol not in {r["source"] for r in result["relations"]}
+
+
+def test_relations_among_keeps_relation_properties(data):
+    alice, bob = _id_of(data, "Person", "Alice"), _id_of(data, "Person", "Bob")
+    [rel] = data.relations_among([alice, bob])["relations"]
+    assert rel["properties"] == {"since": 2020}
+
+
+def test_relations_among_empty_and_unknown_ids(data):
+    assert data.relations_among([])["relations"] == []
+    assert data.relations_among([999999])["relations"] == []
+
+
+def test_relations_among_caps_relations(store):
+    data = GraphViewerData(store, max_relations=1)
+    ids = [_id_of(data, "Person", n) for n in ("Alice", "Bob", "Carol")]
+    result = data.relations_among(ids)
+    assert len(result["relations"]) == 1 and result["truncated"] is True
+
+
+@pytest.mark.parametrize("ids", [["x"], [True], list(range(10_000))])
+def test_relations_among_rejects_bad_ids(data, ids):
+    with pytest.raises(InvalidRequest):
+        data.relations_among(ids)
+
+
+def test_max_relations_must_be_positive(store):
+    with pytest.raises(ValueError):
+        GraphViewerData(store, max_relations=0)

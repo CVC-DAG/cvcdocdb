@@ -101,6 +101,48 @@ def test_index_page_is_served(server):
     assert "cytoscape.min.js" in html and "viewer.js" in html
 
 
+def test_index_page_keeps_the_classic_layout_by_default(server):
+    html = _request(server, "/")[2].decode("utf-8")
+    assert '<html lang="en">' in html
+
+
+def test_light_layout_and_accent_are_applied_to_the_page(store):
+    server, thread = _start(store, layout="light", accent="#00843D", load_all=True)
+    try:
+        html = _request(server, "/")[2].decode("utf-8")
+        assert 'data-layout="light"' in html and 'data-load-all="true"' in html
+        assert "--accent: #00843D" in html
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+
+def test_extra_css_is_served_in_the_page(store):
+    server, thread = _start(store, extra_css="body { color: #123456; }")
+    try:
+        assert "body { color: #123456; }" in _request(server, "/")[2].decode("utf-8")
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+
+def test_invalid_layout_or_accent_is_rejected(store):
+    with pytest.raises(ValueError):
+        create_server(store, port=0, layout="fancy")
+    with pytest.raises(ValueError):
+        create_server(store, port=0, accent="javascript:alert(1)")
+
+
+def test_relations_endpoint(server):
+    nodes = json.loads(_request(server, "/api/nodes?label=Person")[2])["items"]
+    ids = "&".join(f"ids={n['id']}" for n in nodes)
+    status, _, payload = _request(server, f"/api/relations?{ids}")
+    assert status == 200
+    assert [r["type"] for r in json.loads(payload)["relations"]] == ["KNOWS"]
+
+
 @pytest.mark.parametrize(
     "path, content_type",
     [
