@@ -205,14 +205,20 @@ input, and goes through the store's public API.
 ### In a Jupyter notebook
 
 `show()` displays the same viewer inside a cell, without starting a server,
-so it also works in VS Code and Colab. It needs the `notebook` extra
+so it can run wherever anywidget does (JupyterLab, Notebook 7, VS Code, Colab;
+tested in JupyterLab). It needs the `notebook` extra
 (`pip install 'cvcdocdb[notebook]'`, which installs
 [anywidget](https://anywidget.dev)):
 
 ```python
 from cvcdocdb.viewer import show
 
-show(graph, height=650)   # last expression of the cell
+viewer = show(graph)                  # explore from the table and the search
+viewer = show(graph, load_all=True)   # small graphs: draw every node and relation
+viewer                                # last expression of the cell
+
+graph.insertNode(...)                 # after changing the graph from Python...
+viewer.refresh()                      # ...update every view of it
 ```
 
 The page runs in a sandboxed frame with no network access and asks the

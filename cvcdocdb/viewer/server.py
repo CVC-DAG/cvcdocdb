@@ -215,7 +215,7 @@ def create_server(
 
     Args:
         store: The graph store to browse, or a configured
-            :class:`GraphViewerData` (to change its limits).
+            :class:`~cvcdocdb.viewer.data.GraphViewerData` (to change its limits).
         host: Address to bind; ``127.0.0.1`` by default. Binding anything
             else exposes the data to the network — set a *token*.
         port: TCP port; ``0`` picks a free one.

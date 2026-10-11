@@ -6,8 +6,8 @@
 
     show(graph)            # last expression of a cell
 
-No HTTP server is involved, so it works wherever ipywidgets do (JupyterLab,
-Notebook 7, VS Code, Colab). The viewer page runs in a sandboxed ``iframe``
+No HTTP server is involved, so it can run wherever anywidget does (JupyterLab,
+Notebook 7, VS Code, Colab; tested in JupyterLab). The viewer page runs in a sandboxed ``iframe``
 that has no network access; it asks the widget for data with
 ``postMessage``, the widget forwards the request to the kernel, and the
 kernel answers it with :func:`cvcdocdb.viewer.api.handle_api` — the same
@@ -39,6 +39,7 @@ __all__ = ["GraphViewerWidget", "build_page"]
 logger = logging.getLogger(__name__)
 
 MESSAGE_TYPE = "cvcdocdb-api"
+REFRESH_TYPE = "cvcdocdb-refresh"
 DEFAULT_HEIGHT = 650
 
 # The frame only runs the inlined scripts and styles: no network at all.
@@ -106,19 +107,32 @@ class GraphViewerWidget(anywidget.AnyWidget):
 
     Args:
         store: The graph store to browse, or a configured
-            :class:`~cvcdocdb.viewer.GraphViewerData` (to change its limits).
+            :class:`~cvcdocdb.viewer.data.GraphViewerData` (to change its limits).
         height: Height of the viewer in pixels.
+        load_all: Show the whole graph on the canvas (up to 300 nodes) and
+            keep it whole on :meth:`refresh` — for small graphs, such as a
+            tutorial's.
+
+    The viewer reads the store when the user asks for something. After
+    changing the graph from Python, call :meth:`refresh` to update it.
     """
 
     _esm = _static_text("widget.js")
     height = traitlets.Int(DEFAULT_HEIGHT).tag(sync=True)
+    load_all = traitlets.Bool(False).tag(sync=True)
     _page = traitlets.Unicode("").tag(sync=True)
 
     def __init__(self, store: Union[GraphStore, GraphViewerData], height: int = DEFAULT_HEIGHT,
-                 **kwargs: Any) -> None:
-        super().__init__(height=height, _page=build_page(), **kwargs)
+                 load_all: bool = False, **kwargs: Any) -> None:
+        super().__init__(height=height, load_all=load_all, _page=build_page(), **kwargs)
         self.data = store if isinstance(store, GraphViewerData) else GraphViewerData(store)
         self.on_msg(self._handle_message)
+
+    def refresh(self) -> None:
+        """Read the store again and update every view of the widget: the
+        sidebar, the table and the canvas (deleted nodes go away; expanded
+        nodes, or the whole graph with *load_all*, are fetched again)."""
+        self.send({"type": REFRESH_TYPE})
 
     def _answer(self, path: Any, params: Any) -> Tuple[int, Any]:
         try:

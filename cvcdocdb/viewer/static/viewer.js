@@ -102,13 +102,25 @@
     window.addEventListener("message", function (event) {
       if (event.source !== window.parent) return;
       var msg = event.data;
+      if (msg && msg.type === "cvcdocdb-theme") { applyTheme(msg.theme); return; }
+      if (msg && msg.type === "cvcdocdb-refresh") { refresh(); return; }
       if (!msg || msg.type !== "cvcdocdb-api" || !pending[msg.id]) return;
       var request = pending[msg.id];
       delete pending[msg.id];
       clearTimeout(request.timer);
-      if (msg.ok) request.resolve(msg.body);
-      else request.reject(new Error(msg.body && msg.body.error ? msg.body.error : "Request failed"));
+      if (msg.ok) { request.resolve(msg.body); return; }
+      var error = new Error(msg.body && msg.body.error ? msg.body.error : "Request failed");
+      error.status = msg.status;
+      request.reject(error);
     });
+  }
+
+  // "dark"/"light" from the widget (following JupyterLab, VS Code...);
+  // anything else falls back to the OS preference (see viewer.css).
+  function applyTheme(theme) {
+    if (theme === "dark" || theme === "light") document.documentElement.setAttribute("data-theme", theme);
+    else document.documentElement.removeAttribute("data-theme");
+    if (cy) cy.style().selector("node").style("color", getComputedStyle(document.body).color).update();
   }
 
   function bridgeRequest(path, pairs) {
@@ -138,7 +150,9 @@
           if (!response.ok) {
             var msg = body && body.error ? body.error : response.statusText;
             if (response.status === 401) msg = "Unauthorized: open the viewer with ?token=<token> in the URL.";
-            throw new Error(msg);
+            var error = new Error(msg);
+            error.status = response.status;
+            throw error;
           }
           return body;
         });
@@ -388,8 +402,10 @@
     return capped;
   }
 
+  function edgeId(rel) { return "e:" + rel.source + ":" + rel.type + ":" + rel.target; }
+
   function addEdge(rel) {
-    var id = "e:" + rel.source + ":" + rel.type + ":" + rel.target;
+    var id = edgeId(rel);
     if (cy.getElementById(id).nonempty()) return;
     if (cy.getElementById(String(rel.source)).empty() || cy.getElementById(String(rel.target)).empty()) return;
     var edge = cy.add({ group: "edges", data: { id: id, source: String(rel.source), target: String(rel.target), type: rel.type } });
@@ -402,18 +418,24 @@
     });
   }
 
+  var MAX_FIT_ZOOM = 1.5;  // a handful of nodes shouldn't fill the canvas
+
   function runLayout() {
     var randomize = cy.nodes().length < 3;
-    cy.layout({ name: "cose", animate: false, randomize: randomize, fit: true, padding: 30,
-                nodeRepulsion: 8000, idealEdgeLength: 80 }).run();
+    var layout = cy.layout({ name: "cose", animate: false, randomize: randomize, fit: true, padding: 30,
+                             nodeRepulsion: 8000, idealEdgeLength: 80 });
+    layout.one("layoutstop", function () {
+      if (cy.zoom() > MAX_FIT_ZOOM) { cy.zoom(MAX_FIT_ZOOM); cy.center(); }
+    });
+    layout.run();
   }
 
   function expand(id) {
     var direction = $("expand-direction").value;
     var types = Object.keys(state.hiddenTypes).length ? visibleTypes() : [null];
-    if (!types.length) { showError("All relation types are unticked: nothing to follow."); return; }
+    if (!types.length) { showError("All relation types are unticked: nothing to follow."); return Promise.resolve(); }
     var source = cy.getElementById(String(id));
-    Promise.all(types.map(function (type) {
+    return Promise.all(types.map(function (type) {
       return api("api/nodes/" + encodeURIComponent(id) + "/neighbours",
                  [["direction", direction], ["type", type], ["limit", NEIGHBOUR_LIMIT]]);
     })).then(function (results) {
@@ -441,6 +463,83 @@
       var name = li.querySelector(".name");
       return box && box.checked && name ? name.textContent : null;
     }).filter(function (t) { return t !== null; });
+  }
+
+  // ------------------------------------------------------------------
+  // Refresh: the data changed underneath (Refresh button, or refresh() on
+  // the notebook widget). With data-load-all on <html> (the widget's
+  // load_all) the canvas shows the whole graph, up to MAX_RENDERED_NODES.
+  // ------------------------------------------------------------------
+
+  var LOAD_ALL = document.documentElement.getAttribute("data-load-all") === "true";
+  var PAGE_MAX = 200;
+
+  function updateNodes(nodes) {
+    nodes.forEach(function (node) {
+      var element = cy.getElementById(String(node.id));
+      if (element.nonempty()) element.data(graphNodeData(node));
+    });
+  }
+
+  function fetchAllNodes() {
+    var nodes = [];
+    function page(offset) {
+      return api("api/nodes", [["offset", offset], ["limit", PAGE_MAX]]).then(function (result) {
+        nodes = nodes.concat(result.items);
+        var more = result.items.length === PAGE_MAX && nodes.length <= MAX_RENDERED_NODES;
+        return more ? page(offset + PAGE_MAX) : nodes;
+      });
+    }
+    return page(0);
+  }
+
+  function loadWholeGraph() {
+    return fetchAllNodes().then(function (nodes) {
+      var present = {};
+      nodes.forEach(function (node) { present[String(node.id)] = true; });
+      cy.nodes().filter(function (n) { return !present[n.id()]; }).remove();
+      updateNodes(nodes);
+      var capped = addNodes(nodes, false);
+      var ids = cy.nodes().map(function (n) { return n.data("nodeId"); });
+      return Promise.all(ids.map(function (id) {
+        return api("api/nodes/" + encodeURIComponent(id) + "/neighbours",
+                   [["direction", "out"], ["limit", NEIGHBOUR_LIMIT]]);
+      })).then(function (results) {
+        var seen = {};
+        results.forEach(function (result) {
+          result.relations.forEach(function (rel) { seen[edgeId(rel)] = true; addEdge(rel); });
+        });
+        cy.edges().filter(function (e) { return !seen[e.id()]; }).remove();
+        runLayout();
+        updateGraphCount(capped);
+      });
+    });
+  }
+
+  /** Drop deleted nodes, update the rest and re-expand the expanded ones. */
+  function refreshCanvas() {
+    var ids = cy.nodes().map(function (n) { return n.data("nodeId"); });
+    return Promise.all(ids.map(function (id) {
+      return api("api/nodes/" + encodeURIComponent(id)).catch(function (err) {
+        if (err.status === 404) return null;
+        throw err;
+      });
+    })).then(function (nodes) {
+      nodes.forEach(function (node, i) {
+        if (node) updateNodes([node]);
+        else cy.getElementById(String(ids[i])).remove();
+      });
+      var expanded = cy.nodes(".expanded");
+      // Every edge on the canvas comes from expanding a node: rebuild them.
+      expanded.connectedEdges().remove();
+      return Promise.all(expanded.map(function (n) { return expand(n.data("nodeId")); }));
+    }).then(function () { updateGraphCount(false); });
+  }
+
+  function refresh() {
+    showError(null);
+    return loadSummary().then(search).then(LOAD_ALL ? loadWholeGraph : refreshCanvas)
+      .catch(function (err) { showError(err.message); });
   }
 
   cy.on("tap", "node", function (event) { showDetail(event.target.data("nodeId")); });
@@ -486,6 +585,7 @@
   });
   $("add-page-to-graph").addEventListener("click", function () { addNodes(state.items, true); });
 
+  $("graph-refresh").addEventListener("click", refresh);
   $("graph-fit").addEventListener("click", function () { cy.fit(undefined, 30); });
   $("graph-layout").addEventListener("click", runLayout);
   $("graph-reset").addEventListener("click", function () {
@@ -494,7 +594,7 @@
     updateGraphCount(false);
   });
 
-  loadSummary().then(search).catch(function (err) {
+  loadSummary().then(search).then(function () { if (LOAD_ALL) return loadWholeGraph(); }).catch(function (err) {
     $("store-info").textContent = "Not connected";
     showError(err.message);
   });

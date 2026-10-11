@@ -281,9 +281,9 @@ class GraphViewerData:
         """Node counts per main label and relation counts per type.
 
         Returns:
-            ``{"backend", "labels": [{"label", "count"}], "relation_types":
-            [{"type", "count"}], "node_count", "relation_count"}``, sorted by
-            name.
+            A dict with ``backend``, ``labels`` (``[{"label", "count"}]``),
+            ``relation_types`` (``[{"type", "count"}]``), ``node_count`` and
+            ``relation_count``; labels and types sorted by name.
         """
         label_counts: Dict[str, int] = {}
         for row in self._cypher(_COUNT_LABELS):
@@ -361,8 +361,8 @@ class GraphViewerData:
             limit: Results to return; capped at ``max_page_size``.
 
         Returns:
-            ``{"items": [node summary...], "total", "total_is_exact",
-            "offset", "limit"}``. At most ``max_scan`` nodes are read, so
+            A dict with ``items`` (node summaries), ``total``,
+            ``total_is_exact``, ``offset`` and ``limit``. At most ``max_scan`` nodes are read, so
             past that ``total`` is a lower bound and ``total_is_exact`` is
             False.
 
@@ -436,9 +436,9 @@ class GraphViewerData:
             limit: Most relations to return; capped at ``max_neighbours``.
 
         Returns:
-            ``{"node": node summary, "relations": [{"type", "direction",
-            "source", "target", "properties", "neighbour": node summary}],
-            "truncated": bool}``.
+            A dict with ``node`` (its summary), ``relations`` (each with
+            ``type``, ``direction``, ``source``, ``target``, ``properties``
+            and ``neighbour``, the other node's summary) and ``truncated``.
 
         Raises:
             InvalidRequest: On an invalid argument.

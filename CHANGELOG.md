@@ -26,13 +26,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   new mandatory dependencies.
 - **Graph viewer in Jupyter notebooks: `cvcdocdb.viewer.show(store)`.** The
   same viewer as an [anywidget](https://anywidget.dev) widget
-  (`GraphViewerWidget`), with no HTTP server, so it works in JupyterLab,
-  Notebook 7, VS Code and Colab. The page runs in a sandboxed `iframe` with no
+  (`GraphViewerWidget`), with no HTTP server, so it can run wherever
+  anywidget does (JupyterLab, Notebook 7, VS Code, Colab; tested in
+  JupyterLab). The page runs in a sandboxed `iframe` with no
   network access and asks the kernel for data through the widget; the kernel
   answers with the same read-only API as the server (request routing now
   shared in `cvcdocdb.viewer.api`). Needs the new optional extra
   `pip install 'cvcdocdb[notebook]'`; `cvcdocdb.viewer` still imports without
-  it.
+  it. `viewer.refresh()` updates every view after the graph changes from
+  Python, `show(store, load_all=True)` draws the whole graph (up to 300
+  nodes), and the viewer follows the notebook's light or dark theme. Both
+  versions of the viewer get a **Refresh** button.
 
 ## [1.6.0] - 2026-10-02
 

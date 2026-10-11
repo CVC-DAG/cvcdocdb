@@ -44,14 +44,18 @@ __all__ = [
 ]
 
 
-def show(store: Any, height: int = 650) -> Any:
+def show(store: Any, height: int = 650, load_all: bool = False) -> Any:
     """The viewer for *store* as a Jupyter widget; make it a cell's last
     expression to display it.
 
     Args:
         store: The graph store to browse, or a configured
-            :class:`GraphViewerData` (to change its limits).
+            :class:`~cvcdocdb.viewer.data.GraphViewerData` (to change its limits).
         height: Height of the viewer in pixels.
+        load_all: Show the whole graph on the canvas (up to 300 nodes), for
+            small graphs such as a tutorial's.
+
+    Call ``refresh()`` on the returned widget after changing the graph.
 
     Returns:
         A :class:`cvcdocdb.viewer.notebook.GraphViewerWidget`.
@@ -62,4 +66,4 @@ def show(store: Any, height: int = 650) -> Any:
     # Imported here so the rest of the viewer doesn't need anywidget.
     from .notebook import GraphViewerWidget
 
-    return GraphViewerWidget(store, height=height)
+    return GraphViewerWidget(store, height=height, load_all=load_all)

@@ -205,3 +205,38 @@ def test_viewer_package_does_not_import_anywidget():
     code = "import sys, cvcdocdb.viewer; print('anywidget' in sys.modules)"
     out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True)
     assert out.stdout.strip() == "False"
+
+
+def test_page_can_follow_the_notebook_theme():
+    page = build_page()
+    # The widget sets <html data-theme> and sends "cvcdocdb-theme" messages.
+    assert '<html lang="en">' in page
+    assert ':root[data-theme="dark"]' in page and ':root:not([data-theme="light"])' in page
+    assert "cvcdocdb-theme" in page
+
+
+def test_refresh_asks_the_page_to_reload(widget):
+    widget.refresh()
+    assert widget.sent == [{"type": "cvcdocdb-refresh"}]
+
+
+def test_load_all_is_off_by_default_and_synced(store):
+    w = GraphViewerWidget(store)
+    assert w.load_all is False and "load_all" in w.keys
+    w.close()
+    w = GraphViewerWidget(store, load_all=True)
+    assert w.load_all is True
+    w.close()
+
+
+def test_show_passes_load_all(store):
+    from cvcdocdb.viewer import show
+
+    w = show(store, load_all=True)
+    assert w.load_all is True
+    w.close()
+
+
+def test_page_has_a_refresh_button():
+    page = build_page()
+    assert 'id="graph-refresh"' in page and "cvcdocdb-refresh" in page and "data-load-all" in page
