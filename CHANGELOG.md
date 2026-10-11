@@ -47,6 +47,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`create_group()` with nested WeakNodes** (a page under a section under the
+  document). Each WeakNode is now linked to its own parent, on every backend.
+  Before, `Neo4jGraph` and `MemgraphGraph` linked every WeakNode of the group
+  to the strong node (the page hung from the document and the section had no
+  pages), and `NetworkXGraph` and `JenaGraph` failed with a `KeyError` and
+  rolled the group back. The WeakNodes may now come in any order; a WeakNode
+  whose parent is neither the strong node nor another WeakNode of the group
+  raises `ValueError` before anything is written. Groups created earlier on
+  Neo4j or Memgraph keep the old structure.
 - **Delete-strategies tutorial.** The CASCADE step now passes `detach=True`
   (without it `deleteNode()` refuses to delete a node that still has
   relations, so the notebook stopped with a `RuntimeError`), and each run uses
