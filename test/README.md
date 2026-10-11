@@ -30,6 +30,29 @@ pytest test/ -m "not slow"
 pytest test/ -m slow
 ```
 
+### Only the tests for what you changed (`--changed`)
+
+```bash
+pytest test/ --changed            # files changed against HEAD, committed or not, plus untracked
+pytest test/ --changed=develop    # everything changed on this branch since develop
+```
+
+`test/changed_selection.py` maps each changed file to test files and the
+rest are deselected:
+
+| Changed file | Tests run |
+|---|---|
+| `test/test_x.py` | that file |
+| `cvcdocdb/<name>.py`, anything under `cvcdocdb/<name>/` | `test_<name>*.py` (e.g. `viewer` → `test_viewer_*.py`) |
+| `setup.py`, `MANIFEST.in`, `requirements*.txt`, `pyproject.toml` | `test_packaging.py` |
+| `*.md`, `*.rst`, `docs/`, notebooks | none |
+| `cvcdocdb/base.py`, `graph_store.py`, `__init__.py`, a module no test is named after, `conftest.py` or another test helper, anything else | **the whole suite** |
+
+When in doubt it runs everything, so a new module should get tests named
+`test_<module>*.py` to benefit. If no selected test talks to a server, the
+Neo4j/Memgraph/Fuseki Docker containers aren't started either. Run the full
+suite before merging.
+
 ### Automatic Neo4j skip
 
 `conftest.py` probes `NEO4J_DEV_URL` / `NEO4J_URL` (default `bolt://localhost:7687`)
