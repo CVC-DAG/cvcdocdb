@@ -35,7 +35,6 @@ _mock_neo4j_instance.exceptions = _mock_neo4j_exceptions
 sys.modules["neo4j"] = _mock_neo4j_instance
 sys.modules["neo4j.exceptions"] = _mock_neo4j_exceptions
 sys.modules["tqdm"] = _unittest_mock.MagicMock()
-sys.modules["traitlets"] = _unittest_mock.MagicMock()
 
 # Import hnswlib for skipIf decorators — may not be installed
 try:
