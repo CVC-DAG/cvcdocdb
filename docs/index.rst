@@ -19,6 +19,7 @@ tutorials and API.
    api/base
    api/graph_store
    api/migration
+   api/viewer
 
 .. toctree::
    :maxdepth: 1
@@ -74,6 +75,9 @@ Features
 - **Lazy background initialization**: ``init_propagation()`` scans the
   backend graph, detects WeakNodes from edge structure, and initializes
   propagation properties. Supports background mode and progress callbacks.
+- **Graph viewer**: a read-only, interactive viewer for any backend, as a
+  Jupyter widget (``cvcdocdb.viewer.show``, ``pip install "cvcdocdb[notebook]"``)
+  or a local web page (``python -m cvcdocdb.viewer``); see :doc:`api/viewer`.
 - **Backend-to-backend migration**: ``cvcdocdb.migration.migrate()`` copies
   an entire graph — nodes, edges, propagation properties and vector indexes —
   between any two ``GraphStore`` backends (e.g. ``NetworkXGraph`` →

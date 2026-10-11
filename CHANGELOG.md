@@ -37,6 +37,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Python, `show(store, load_all=True)` draws the whole graph (up to 300
   nodes), and the viewer follows the notebook's light or dark theme. Both
   versions of the viewer get a **Refresh** button.
+- **The tutorial notebooks use the viewer.** The WeakNode notebook
+  (`interactive/weaknodes.ipynb`) is now an editor: an ipywidgets control
+  panel adds and deletes nodes and the viewer shows each change (it replaces
+  a hand-made Cytoscape view that needed trusted JavaScript outputs). The
+  getting-started, dataset, delete-strategies and RiC-O (NetworkX) notebooks
+  open their graphs in the viewer, and their install cell installs
+  `cvcdocdb[notebook]`. New docs page: *Graph viewer*.
+
+### Fixed
+
+- **Delete-strategies tutorial.** The CASCADE step now passes `detach=True`
+  (without it `deleteNode()` refuses to delete a node that still has
+  relations, so the notebook stopped with a `RuntimeError`), and each run uses
+  its own temporary files, so running the notebook again no longer fails with
+  a duplicate key.
 
 ## [1.6.0] - 2026-10-02
 

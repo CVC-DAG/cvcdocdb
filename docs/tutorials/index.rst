@@ -11,6 +11,12 @@ Tutorials and examples for the core of cvcdocdb. They use only the common
 because it needs no server. Tutorials for the optional modules live with each module in
 :doc:`../optional/index`.
 
+The tutorials show their graphs in the :doc:`../api/viewer` (``show(graph)``):
+click a node to see its properties, double-click it to expand its neighbours,
+and search or filter from the sidebar. The viewer needs a running kernel, so it
+appears when you run a notebook (locally, in Colab or in Kaggle), not on these
+pages.
+
 Getting Started
 ---------------
 
@@ -25,7 +31,9 @@ Start here for a minimal end-to-end graph workflow:
 Core concepts
 -------------
 
-WeakNode hierarchies and deletion strategies:
+WeakNode hierarchies and deletion strategies. The WeakNode notebook is an
+interactive editor: a control panel adds and deletes nodes, and the viewer shows
+each change.
 
 .. toctree::
    :maxdepth: 1
@@ -113,8 +121,9 @@ Notes
 
 - Notebook pages keep the original ``.ipynb`` download link in the rendered output.
 - Tutorials are configured to use the ``cvcdocdb`` Jupyter kernel by default.
-- Each tutorial notebook starts with an installation cell that upgrades DRM
-  from GitHub and falls back to a local editable install when needed.
+- Each tutorial notebook starts with an installation cell that installs
+  ``cvcdocdb[notebook]`` (the library plus the viewer's ``anywidget``) when it
+  is missing.
 - Button links can be customized with env vars: ``DRM_DOCS_GITHUB_REPO``,
   ``DRM_DOCS_GITHUB_REF``, ``DRM_DOCS_LOCAL_JUPYTER_BASE``, and
   ``DRM_DOCS_LOCAL_NOTEBOOK_PREFIX``.
