@@ -174,6 +174,34 @@ The pipeline maps OWL constructs to DRM:
 - `owl:hasKey` -- Primary key fields
 - `rdfs:comment` -- Class docstring
 
+## Graph viewer (cvcdocdb.viewer)
+
+A read-only web page to browse the data of any backend: node labels with
+counts, filters by label and property, free-text search with paging, node
+properties, and a graph canvas where you expand a node's neighbours. It needs
+no extra dependencies and makes no network requests (cytoscape.js is vendored).
+
+```bash
+python -m cvcdocdb.viewer path/to/graph.pkl                     # NetworkXGraph pickle
+python -m cvcdocdb.viewer --backend neo4j --url bolt://localhost:7687 --user neo4j
+python -m cvcdocdb.viewer --backend jena --url http://localhost:3030/ds
+```
+
+The remote password is read from `CVCDOCDB_PASSWORD` (or asked for). The
+server binds to `127.0.0.1:8765` by default (`--host`, `--port`); use
+`--token` (or `CVCDOCDB_VIEWER_TOKEN`) to require a token on the API, and
+`--no-browser` not to open the page. From Python:
+
+```python
+from cvcdocdb import NetworkXGraph
+from cvcdocdb.viewer import serve_viewer
+
+serve_viewer(NetworkXGraph(persistence_path="graph.pkl"))  # http://127.0.0.1:8765/
+```
+
+The viewer only reads: it accepts GET requests only, validates and caps every
+input, and goes through the store's public API.
+
 ## Example Dataset Loaders (cvcdocdb.exemples)
 
 The package includes ready-to-run loaders for common graph domains. They
@@ -383,6 +411,10 @@ third parties needs a commercial license from Memgraph. Each Memgraph version
 becomes Apache-2.0 on the license's Change Date, or four years after that
 version's first release, whichever comes first. Enterprise features (e.g.
 multi-tenancy) need a Memgraph Enterprise License.
+
+The graph viewer (`cvcdocdb.viewer`) ships a copy of
+[cytoscape.js](https://js.cytoscape.org/) 3.30.2 (MIT), with its license at
+`cvcdocdb/viewer/static/vendor/cytoscape.LICENSE.txt`.
 
 Python packages installed with CVCDocDB are under licenses compatible with the GPL-3.0:
 

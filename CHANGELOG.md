@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Interactive graph viewer: `cvcdocdb.viewer`.** A read-only web page to
+  browse the data of any `GraphStore` backend (`NetworkXGraph`, `Neo4jGraph`,
+  `MemgraphGraph`, `JenaGraph`): node labels with counts, relation types,
+  search by label, property filters (chips) and free text with paging, node
+  detail, and a graph canvas where nodes can be expanded to their neighbours
+  (optional relation-type filter, cap on rendered nodes). Launch it with
+  `serve_viewer(store)` or `python -m cvcdocdb.viewer graph.pkl`
+  (`--backend neo4j|memgraph|jena --url ...` for a remote store). It uses only
+  the standard library (`http.server`): GET-only JSON API, bound to
+  `127.0.0.1` by default, optional token (`--token` /
+  `CVCDOCDB_VIEWER_TOKEN`), validated and capped inputs, and reads only
+  through the store's public API (dict filters, fixed parametrised read
+  queries). The page works offline with a vendored cytoscape.js 3.30.2
+  (MIT, license shipped next to it). Additive: no existing API changes and no
+  new mandatory dependencies.
+
 ## [1.6.0] - 2026-10-02
 
 ### Changed

@@ -58,6 +58,8 @@ setup(
     license=LICENSE,
     packages=PACKAGES,
     package_dir={"": "."},
+    # The graph viewer's page, scripts and vendored cytoscape.js (+ license).
+    package_data={"cvcdocdb.viewer": ["static/*.html", "static/*.js", "static/*.css", "static/vendor/*"]},
     install_requires=INSTALL_REQUIRES,
     extras_require=EXTRAS_REQUIRE,
     keywords=["document representation", "knowledge graph", "neo4j", "memgraph", "networkx", "sparql", "jena", "rdf", "document analysis"],

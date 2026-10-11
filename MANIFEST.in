@@ -1,1 +1,2 @@
 prune test
+recursive-include cvcdocdb/viewer/static *.html *.js *.css *.txt
