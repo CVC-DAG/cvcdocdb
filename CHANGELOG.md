@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.8.0] - 2026-10-11
+
 ### Added
 
 - **Graph viewer: filter by node type.** Clicking node labels in the
