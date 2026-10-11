@@ -12,6 +12,8 @@
   ];
 
   var token = new URLSearchParams(window.location.search).get("token");
+  // Light layout: graph first (see viewer.css and cvcdocdb.viewer.page).
+  var LIGHT = document.documentElement.getAttribute("data-layout") === "light";
 
   var state = {
     label: null,
@@ -210,6 +212,7 @@
   }
 
   function setLabel(label) {
+    if (LIGHT) setTableOpen(true);
     state.label = label;
     state.offset = 0;
     Array.prototype.forEach.call($("label-list").children, function (li) {
@@ -312,6 +315,7 @@
     var graphNode = cy.getElementById(String(id));
     if (graphNode.nonempty()) graphNode.select();
     var panel = $("detail");
+    if (LIGHT) document.body.classList.add("detail-open");
     return api("api/nodes/" + encodeURIComponent(id)).then(function (node) {
       rememberProps(node);
       clear(panel);
@@ -344,6 +348,10 @@
   // Graph
   // ------------------------------------------------------------------
 
+  function accentColor() {
+    return getComputedStyle(document.documentElement).getPropertyValue("--accent").trim() || "#2f6fde";
+  }
+
   var cy = cytoscape({
     container: $("cy"),
     wheelSensitivity: 0.3,
@@ -356,13 +364,14 @@
         "width": 22, "height": 22, "text-max-width": 120, "text-wrap": "ellipsis",
         "border-width": 0
       } },
-      { selector: "node:selected", style: { "border-width": 3, "border-color": "#2f6fde" } },
+      { selector: "node:selected", style: { "border-width": 3, "border-color": accentColor() } },
       { selector: "node.expanded", style: { "shape": "round-rectangle" } },
       { selector: "edge", style: {
         "width": 1.5, "line-color": "#9aa2b4", "target-arrow-color": "#9aa2b4",
-        "target-arrow-shape": "triangle", "curve-style": "bezier", "label": "data(type)",
+        "target-arrow-shape": "triangle", "curve-style": "bezier", "label": LIGHT ? "" : "data(type)",
         "font-size": 8, "color": "#8a93a6", "text-rotation": "autorotate", "text-background-opacity": 0
       } },
+      { selector: "edge.show-label", style: { "label": "data(type)" } },
       { selector: "edge.hidden-type", style: { "display": "none" } }
     ],
     layout: { name: "grid" }
@@ -501,17 +510,13 @@
       updateNodes(nodes);
       var capped = addNodes(nodes, false);
       var ids = cy.nodes().map(function (n) { return n.data("nodeId"); });
-      return Promise.all(ids.map(function (id) {
-        return api("api/nodes/" + encodeURIComponent(id) + "/neighbours",
-                   [["direction", "out"], ["limit", NEIGHBOUR_LIMIT]]);
-      })).then(function (results) {
+      // One request for every edge of the canvas, not one per node.
+      return api("api/relations", ids.map(function (id) { return ["ids", id]; })).then(function (result) {
         var seen = {};
-        results.forEach(function (result) {
-          result.relations.forEach(function (rel) { seen[edgeId(rel)] = true; addEdge(rel); });
-        });
+        result.relations.forEach(function (rel) { seen[edgeId(rel)] = true; addEdge(rel); });
         cy.edges().filter(function (e) { return !seen[e.id()]; }).remove();
         runLayout();
-        updateGraphCount(capped);
+        updateGraphCount(capped || result.truncated);
       });
     });
   }
@@ -543,6 +548,19 @@
   }
 
   cy.on("tap", "node", function (event) { showDetail(event.target.data("nodeId")); });
+  // Light layout: relation names only on the selected node's edges.
+  cy.on("select", "node", function (event) { event.target.connectedEdges().addClass("show-label"); });
+  cy.on("unselect", "node", function (event) { event.target.connectedEdges().removeClass("show-label"); });
+
+  function setTableOpen(open) {
+    document.body.classList.toggle("table-open", open);
+    $("toggle-table").setAttribute("aria-expanded", String(open));
+    cy.resize();
+    if (cy.nodes().length) {
+      cy.fit(undefined, 30);
+      if (cy.zoom() > MAX_FIT_ZOOM) { cy.zoom(MAX_FIT_ZOOM); cy.center(); }
+    }
+  }
   cy.on("dbltap", "node", function (event) { expand(event.target.data("nodeId")); });
 
   // ------------------------------------------------------------------
@@ -551,6 +569,7 @@
 
   $("search-form").addEventListener("submit", function (event) {
     event.preventDefault();
+    if (LIGHT) setTableOpen(true);
     state.text = $("search-text").value.trim();
     state.offset = 0;
     renderChips();
@@ -586,6 +605,13 @@
   $("add-page-to-graph").addEventListener("click", function () { addNodes(state.items, true); });
 
   $("graph-refresh").addEventListener("click", refresh);
+  $("toggle-table").addEventListener("click", function () {
+    setTableOpen(!document.body.classList.contains("table-open"));
+  });
+  $("detail-close").addEventListener("click", function () {
+    document.body.classList.remove("detail-open");
+    cy.$(":selected").unselect();
+  });
   $("graph-fit").addEventListener("click", function () { cy.fit(undefined, 30); });
   $("graph-layout").addEventListener("click", runLayout);
   $("graph-reset").addEventListener("click", function () {

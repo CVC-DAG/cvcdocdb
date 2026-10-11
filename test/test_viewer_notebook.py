@@ -77,6 +77,18 @@ def test_handle_api_rejects_bad_parameters(data, path, query):
         handle_api(data, path, query)
 
 
+def test_handle_api_relations(data):
+    alice = _alice_id(data)
+    [bob] = data.search(text="Bob")["items"]
+    result = handle_api(data, "/api/relations", {"ids": [str(alice), str(bob["id"])]})
+    assert [(r["source"], r["type"], r["target"]) for r in result["relations"]] == [(alice, "KNOWS", bob["id"])]
+
+
+def test_handle_api_relations_rejects_bad_ids(data):
+    with pytest.raises(InvalidRequest):
+        handle_api(data, "/api/relations", {"ids": ["abc"]})
+
+
 def test_handle_api_unknown_node(data):
     with pytest.raises(NodeNotFound):
         handle_api(data, "/api/nodes/999999", {})

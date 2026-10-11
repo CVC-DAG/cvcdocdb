@@ -28,6 +28,7 @@ parametrised read-only Cypher). See :mod:`cvcdocdb.viewer.data` and
 from typing import Any
 
 from .data import FILTER_OPERATORS, GraphViewerData, InvalidRequest, NodeNotFound
+from .page import LAYOUTS, build_page
 from .server import DEFAULT_HOST, DEFAULT_PORT, ViewerServer, create_server, serve_viewer
 
 __all__ = [
@@ -36,8 +37,10 @@ __all__ = [
     "FILTER_OPERATORS",
     "GraphViewerData",
     "InvalidRequest",
+    "LAYOUTS",
     "NodeNotFound",
     "ViewerServer",
+    "build_page",
     "create_server",
     "serve_viewer",
     "show",

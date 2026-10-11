@@ -33,6 +33,7 @@ except ImportError as exc:  # pragma: no cover - depends on the environment
 from ..graph_store import GraphStore
 from .api import UnknownEndpoint, handle_api
 from .data import GraphViewerData, InvalidRequest, NodeNotFound
+from .page import build_page
 
 __all__ = ["GraphViewerWidget", "build_page"]
 
@@ -42,52 +43,9 @@ MESSAGE_TYPE = "cvcdocdb-api"
 REFRESH_TYPE = "cvcdocdb-refresh"
 DEFAULT_HEIGHT = 650
 
-# The frame only runs the inlined scripts and styles: no network at all.
-_CSP = (
-    "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; "
-    "img-src data:; connect-src 'none'; base-uri 'none'; form-action 'none'"
-)
-
 
 def _static_text(name: str) -> str:
     return (resources.files(__package__) / "static").joinpath(*name.split("/")).read_text("utf-8")
-
-
-def _script(code: str) -> str:
-    # "</script" would end the element early; it can only occur in strings.
-    return "<script>" + code.replace("</script", "<\\/script") + "</script>"
-
-
-def _replace_once(page: str, old: str, new: str) -> str:
-    if page.count(old) != 1:
-        raise RuntimeError(f"Unexpected viewer page template: {old!r} not found exactly once")
-    return page.replace(old, new)
-
-
-def build_page() -> str:
-    """The viewer page with its styles and scripts inlined, set to ask its
-    parent window for data instead of the HTTP API."""
-    page = _static_text("index.html")
-    page = _replace_once(
-        page,
-        '<meta charset="utf-8">',
-        f'<meta charset="utf-8">\n  <meta http-equiv="Content-Security-Policy" content="{_CSP}">',
-    )
-    page = _replace_once(
-        page,
-        '<link rel="stylesheet" href="static/viewer.css">',
-        "<style>" + _static_text("viewer.css") + "</style>",
-    )
-    page = _replace_once(
-        page,
-        '<script src="static/vendor/cytoscape.min.js"></script>',
-        _script(_static_text("vendor/cytoscape.min.js")),
-    )
-    return _replace_once(
-        page,
-        '<script src="static/viewer.js"></script>',
-        _script("window.CVCDOCDB_BRIDGE = true;") + _script(_static_text("viewer.js")),
-    )
 
 
 def _query(params: Any) -> Dict[str, List[str]]:
