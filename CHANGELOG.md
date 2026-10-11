@@ -44,6 +44,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   getting-started, dataset, delete-strategies and RiC-O (NetworkX) notebooks
   open their graphs in the viewer, and their install cell installs
   `cvcdocdb[notebook]`. New docs page: *Graph viewer*.
+- **Memgraph and Apache Jena tutorials.** `demos/memgraph_demo.ipynb` and
+  `demos/jena_demo.ipynb` run the workflow of the Neo4j propagation demo (load
+  Game of Thrones, schema and entity classes, `init_propagation()`,
+  `create_group()`, queries, subdocuments, viewer) on Memgraph and on Fuseki;
+  the Jena one queries the RDF in SPARQL, RDF 1.2 reifiers included, and the
+  in-memory copy in Cypher. The dataset notebooks also load their data into
+  `MemgraphGraph` and `JenaGraph`.
 
 ### Fixed
 

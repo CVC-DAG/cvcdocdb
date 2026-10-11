@@ -44,10 +44,11 @@ each change.
 Dataset Examples
 ----------------
 
-Each dataset notebook loads the same data into ``NetworkXGraph`` and
-``Neo4jGraph`` so you can compare them. The loaders in ``cvcdocdb.exemples``
-accept any backend, ``MemgraphGraph`` and ``JenaGraph`` included (the ``neo4j_*``/``networkx_*``
-module names are historical).
+Each dataset notebook loads the same data into ``NetworkXGraph``,
+``Neo4jGraph``, ``MemgraphGraph`` and ``JenaGraph`` so you can compare them (the
+server sections need a running server each). The loaders in
+``cvcdocdb.exemples`` accept any backend (the ``neo4j_*``/``networkx_*`` module
+names are historical).
 
 .. toctree::
    :maxdepth: 1
@@ -94,17 +95,28 @@ workflow as a script: ``python -m cvcdocdb.exemples.demo_propagation``.
 Memgraph
 ~~~~~~~~
 
-There is no Memgraph-specific example: ``MemgraphGraph`` has the same API and
-behaviour as ``Neo4jGraph``, so every general tutorial runs on it by creating
-the graph with ``MemgraphGraph(url, user, password)`` instead.
+``MemgraphGraph`` has the same API and behaviour as ``Neo4jGraph``, so every
+general tutorial runs on it by creating the graph with
+``MemgraphGraph(url, user, password)`` instead. The full propagation workflow of
+the Neo4j demo, on Memgraph:
+
+.. toctree::
+   :maxdepth: 1
+
+   notebooks/demos/memgraph_demo
 
 Apache Jena
 ~~~~~~~~~~~
 
-There is no Jena-specific notebook either: every general tutorial runs on
-``JenaGraph("http://localhost:3030/ds")``. On top of that, the data can be
-queried with SPARQL (see :doc:`../api/jena_graph`) and with
-:doc:`../optional/text2sparql`.
+Every general tutorial runs on ``JenaGraph("http://localhost:3030/ds")``. On top
+of that, the data can be queried with SPARQL (see :doc:`../api/jena_graph`) and
+with :doc:`../optional/text2sparql`. The full propagation workflow of the Neo4j
+demo on Fuseki, querying the graph in SPARQL (RDF 1.2 included) and in Cypher:
+
+.. toctree::
+   :maxdepth: 1
+
+   notebooks/demos/jena_demo
 
 Example scripts (``cvcdocdb.exemples``)
 ---------------------------------------
