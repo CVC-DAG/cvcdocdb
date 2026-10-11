@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Graph viewer: filter by node type.** Clicking node labels in the
+  sidebar now selects one or more types (click again to drop one, **All
+  nodes** to clear) and filters both the results table and the graph canvas:
+  nodes of other types and their relations are hidden, the layout runs on
+  what is left, and the counter shows "N of M nodes". Backed by an additive
+  `labels` argument of `GraphViewerData.search()` (any of them, at most
+  `MAX_LABELS`; combined with `label`) and a repeatable `label` parameter of
+  `GET /api/nodes`.
+- **Graph viewer: level of detail by zoom.** With more than 40 nodes on the
+  canvas, zoomed out (at the zoom of the last layout) shows only the most
+  connected quarter of them (at least 40) and zooming in reveals the rest
+  gradually; the selected node, its neighbours and expanded nodes always
+  show. Nodes are sized by degree, labels too small to read are hidden, and
+  the counter says "N of M nodes … (zoom in for more)". A **detail by zoom**
+  checkbox in the graph toolbar turns it off.
+
 ## [1.7.0] - 2026-10-11
 
 ### Added

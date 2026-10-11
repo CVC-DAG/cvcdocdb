@@ -53,6 +53,8 @@ DEFAULT_MAX_RELATIONS = 2000
 MAX_RELATION_IDS = 1000
 #: Input limits.
 MAX_FILTERS = 20
+#: Most node labels one search accepts.
+MAX_LABELS = 50
 MAX_TEXT_LENGTH = 200
 MAX_IDENTIFIER_LENGTH = 128
 #: Size limits of the values sent to the page.
@@ -357,6 +359,7 @@ class GraphViewerData:
         text: Optional[str] = None,
         offset: int = 0,
         limit: int = DEFAULT_PAGE_SIZE,
+        labels: Optional[Sequence[str]] = None,
     ) -> Dict[str, Any]:
         """Find nodes by main label, property filters and free text.
 
@@ -370,6 +373,8 @@ class GraphViewerData:
             text: Case-insensitive text looked for in every string property.
             offset: Results to skip (paging).
             limit: Results to return; capped at ``max_page_size``.
+            labels: Main labels to restrict to (any of them; at most
+                :data:`MAX_LABELS`), together with *label* if both are given.
 
         Returns:
             A dict with ``items`` (node summaries), ``total``,
@@ -388,9 +393,20 @@ class GraphViewerData:
             if not isinstance(text, str) or len(text) > MAX_TEXT_LENGTH:
                 raise InvalidRequest(f"Search text is limited to {MAX_TEXT_LENGTH} characters")
             text = text.strip().casefold() or None
-        filter_dict = self._filter_dict(label, list(filters))
-
-        rows = self._find(filter_dict, self.max_scan + 1)
+        wanted = ([label] if label is not None else []) + list(labels or [])
+        if len(wanted) > MAX_LABELS:
+            raise InvalidRequest(f"At most {MAX_LABELS} labels are allowed")
+        wanted = list(dict.fromkeys(_identifier(name, "label") for name in wanted))
+        if len(wanted) <= 1:
+            rows = self._find(self._filter_dict(wanted[0] if wanted else None, list(filters)), self.max_scan + 1)
+        else:
+            # One query per label (a label alternative isn't portable across
+            # backends' dict filters), merged; the scan limit is shared.
+            rows = []
+            for name in wanted:
+                rows.extend(self._find(self._filter_dict(name, list(filters)), self.max_scan + 1 - len(rows)))
+                if len(rows) > self.max_scan:
+                    break
         if text:
             rows = [
                 row for row in rows

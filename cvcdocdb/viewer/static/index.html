@@ -28,6 +28,7 @@
       <section>
         <div class="section-title">Node labels</div>
         <ul id="label-list" class="facet-list"></ul>
+        <p class="hint">Click one or more types to show only those in the table and the graph.</p>
       </section>
 
       <section>
@@ -93,6 +94,9 @@
               <option value="out">outgoing</option>
               <option value="in">incoming</option>
             </select>
+          </label>
+          <label class="muted" title="With many nodes, show the most connected ones when zoomed out and the rest as you zoom in">
+            <input id="lod-toggle" type="checkbox" checked> detail by zoom
           </label>
           <span id="graph-count" class="muted"></span>
         </div>

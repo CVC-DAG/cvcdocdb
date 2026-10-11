@@ -16,7 +16,7 @@
   var LIGHT = document.documentElement.getAttribute("data-layout") === "light";
 
   var state = {
-    label: null,
+    labels: [],           // node types selected in the sidebar (none = all)
     filters: [],          // [{prop, op, value}]
     text: "",
     offset: 0,
@@ -172,13 +172,12 @@
       assignLabelColors(summary.labels.map(function (entry) { return entry.label; }));
       var labels = $("label-list");
       clear(labels);
-      labels.appendChild(facet("All nodes", summary.node_count, null, state.label === null, function () {
-        setLabel(null);
+      labels.appendChild(facet("All nodes", summary.node_count, null, !state.labels.length, function () {
+        setLabels([]);
       }));
       summary.labels.forEach(function (entry) {
-        labels.appendChild(facet(entry.label, entry.count, entry.label, state.label === entry.label, function () {
-          setLabel(entry.label);
-        }));
+        labels.appendChild(facet(entry.label, entry.count, entry.label, state.labels.indexOf(entry.label) >= 0,
+                                 function () { toggleLabel(entry.label); }));
       });
       var rels = $("relation-list");
       clear(rels);
@@ -211,15 +210,25 @@
     return item;
   }
 
-  function setLabel(label) {
-    if (LIGHT) setTableOpen(true);
-    state.label = label;
+  /** The selected node types filter both the table and the graph canvas;
+   * none selected shows every type. */
+  function setLabels(labels) {
+    state.labels = labels;
     state.offset = 0;
     Array.prototype.forEach.call($("label-list").children, function (li) {
-      li.className = (li.dataset.label || null) === label ? "active" : "";
+      var label = li.dataset.label || null;
+      li.className = (label === null ? !labels.length : labels.indexOf(label) >= 0) ? "active" : "";
     });
     renderChips();
+    applyLabelFilter(true);
     search();
+  }
+
+  function toggleLabel(label) {
+    var index = state.labels.indexOf(label);
+    setLabels(index >= 0
+      ? state.labels.filter(function (l) { return l !== label; })
+      : state.labels.concat([label]));
   }
 
   // ------------------------------------------------------------------
@@ -231,9 +240,9 @@
   function renderChips() {
     var chips = $("filter-chips");
     clear(chips);
-    if (state.label) {
-      chips.appendChild(chip([swatch(state.label), " label: " + state.label], function () { setLabel(null); }));
-    }
+    state.labels.forEach(function (label) {
+      chips.appendChild(chip([swatch(label), " label: " + label], function () { toggleLabel(label); }));
+    });
     if (state.text) {
       chips.appendChild(chip(["text: “" + state.text + "”"], function () {
         state.text = ""; $("search-text").value = ""; state.offset = 0; renderChips(); search();
@@ -254,7 +263,8 @@
   }
 
   function search() {
-    var params = [["label", state.label], ["q", state.text], ["offset", state.offset], ["limit", state.limit]];
+    var params = state.labels.map(function (label) { return ["label", label]; })
+      .concat([["q", state.text], ["offset", state.offset], ["limit", state.limit]]);
     state.filters.forEach(function (f) { params.push(["f", f.prop + ":" + f.op + ":" + f.value]); });
     return api("api/nodes", params).then(function (result) {
       showError(null);
@@ -361,9 +371,10 @@
       { selector: "node", style: {
         "background-color": "data(color)", "label": "data(caption)", "font-size": 10,
         "color": getComputedStyle(document.body).color, "text-valign": "bottom", "text-margin-y": 3,
-        "width": 22, "height": 22, "text-max-width": 120, "text-wrap": "ellipsis",
-        "border-width": 0
+        "width": "data(size)", "height": "data(size)", "text-max-width": 120, "text-wrap": "ellipsis",
+        "border-width": 0, "min-zoomed-font-size": 7
       } },
+      { selector: "node.lod-hidden", style: { "display": "none" } },
       { selector: "node:selected", style: { "border-width": 3, "border-color": accentColor() } },
       { selector: "node.expanded", style: { "shape": "round-rectangle" } },
       { selector: "edge", style: {
@@ -372,7 +383,8 @@
         "font-size": 8, "color": "#8a93a6", "text-rotation": "autorotate", "text-background-opacity": 0
       } },
       { selector: "edge.show-label", style: { "label": "data(type)" } },
-      { selector: "edge.hidden-type", style: { "display": "none" } }
+      { selector: "edge.hidden-type", style: { "display": "none" } },
+      { selector: "node.hidden-label", style: { "display": "none" } }
     ],
     layout: { name: "grid" }
   });
@@ -382,8 +394,87 @@
              color: colorFor(node.main_label) };
   }
 
+  /** Hide the canvas nodes (and so their relations) of the types that aren't
+   * selected; with *relayout*, lay out and fit what is left. */
+  function applyLabelFilter(relayout) {
+    var labels = state.labels;
+    cy.batch(function () {
+      cy.nodes().forEach(function (node) {
+        node.toggleClass("hidden-label", labels.length > 0 && labels.indexOf(node.data("label")) < 0);
+      });
+    });
+    if (relayout && cy.nodes().length) runLayout();
+    updateGraphCount(false);
+  }
+
+  function nodeShown(node) {
+    return !node.hasClass("hidden-label") && !node.hasClass("lod-hidden");
+  }
+
+  function visibleEdges() {
+    return cy.edges().filter(function (edge) {
+      return !edge.hasClass("hidden-type") && nodeShown(edge.source()) && nodeShown(edge.target());
+    });
+  }
+
+  // ------------------------------------------------------------------
+  // Level of detail: with many nodes, zoomed out shows only the most
+  // connected ones (drawn bigger); zooming in reveals the rest.
+  // ------------------------------------------------------------------
+
+  var LOD_MIN_NODES = 40;        // up to this many, always all of them
+  var LOD_BASE_FRACTION = 0.25;  // share shown at the zoom of the last layout
+  var lodBaseZoom = null;
+  var lodRanked = null;          // filtered canvas nodes, most connected first
+  var lodFrame = null;
+
+  function lodEnabled() { return $("lod-toggle").checked; }
+
+  /** Rank the nodes by degree and size them by it (after each layout): the
+   * square root keeps hubs clearly bigger without dwarfing everything else. */
+  function rankNodes() {
+    var nodes = cy.nodes().not(".hidden-label");
+    lodRanked = nodes.sort(function (a, b) { return b.degree(false) - a.degree(false); });
+    var top = lodRanked.length ? Math.max(1, lodRanked[0].degree(false)) : 1;
+    lodRanked.forEach(function (node) {
+      node.data("size", 14 + Math.round(30 * Math.sqrt(node.degree(false) / top)));
+    });
+  }
+
+  /** How many of *total* ranked nodes to show at *ratio* times the base zoom. */
+  function lodKeepCount(total, ratio) {
+    if (total <= LOD_MIN_NODES) return total;
+    return Math.max(LOD_MIN_NODES, Math.ceil(total * Math.min(1, LOD_BASE_FRACTION * ratio)));
+  }
+
+  function applyLevelOfDetail() {
+    lodFrame = null;
+    if (!lodRanked) return;
+    var on = lodEnabled() && lodBaseZoom;
+    var keep = on ? lodKeepCount(lodRanked.length, cy.zoom() / lodBaseZoom) : lodRanked.length;
+    // Always shown: the selected node, its neighbours and the expanded nodes.
+    var selected = cy.nodes(":selected");
+    var pinned = selected.union(selected.neighborhood().nodes()).union(cy.nodes(".expanded"));
+    cy.batch(function () {
+      cy.nodes(".hidden-label").removeClass("lod-hidden");
+      lodRanked.forEach(function (node, i) {
+        node.toggleClass("lod-hidden", i >= keep && !pinned.contains(node));
+      });
+    });
+    updateGraphCount(false);
+  }
+
+  function scheduleLevelOfDetail() {
+    if (lodFrame === null) lodFrame = window.requestAnimationFrame(applyLevelOfDetail);
+  }
+
   function updateGraphCount(capped) {
-    $("graph-count").textContent = cy.nodes().length + " nodes · " + cy.edges().length + " relations shown";
+    var total = cy.nodes().length;
+    var filtered = cy.nodes().not(".hidden-label").length;
+    var shown = cy.nodes().filter(nodeShown).length;
+    var nodes = shown === total ? String(shown) : shown + " of " + total;
+    var more = shown < filtered ? " (zoom in for more)" : "";
+    $("graph-count").textContent = nodes + " nodes · " + visibleEdges().length + " relations shown" + more;
     var notice = $("graph-notice");
     if (capped) {
       notice.textContent = "Display limit reached (" + MAX_RENDERED_NODES +
@@ -402,10 +493,14 @@
     nodes.forEach(function (node) {
       if (cy.getElementById(String(node.id)).nonempty()) return;
       if (cy.nodes().length >= MAX_RENDERED_NODES) { capped = true; return; }
-      var spec = { group: "nodes", data: graphNodeData(node) };
+      // Default size until the next layout ranks the nodes (rankNodes).
+      var spec = { group: "nodes", data: Object.assign({ size: 22 }, graphNodeData(node)) };
       if (center) spec.position = { x: center.x + (Math.random() - 0.5) * 160, y: center.y + (Math.random() - 0.5) * 160 };
       added.push(cy.add(spec));
     });
+    if (state.labels.length) {
+      added.forEach(function (node) { node.toggleClass("hidden-label", state.labels.indexOf(node.data("label")) < 0); });
+    }
     if (added.length && relayout) runLayout();
     updateGraphCount(capped);
     return capped;
@@ -430,11 +525,19 @@
   var MAX_FIT_ZOOM = 1.5;  // a handful of nodes shouldn't fill the canvas
 
   function runLayout() {
-    var randomize = cy.nodes().length < 3;
-    var layout = cy.layout({ name: "cose", animate: false, randomize: randomize, fit: true, padding: 30,
-                             nodeRepulsion: 8000, idealEdgeLength: 80 });
+    // Only what the node-type filter shows (hidden nodes keep their place).
+    var shown = cy.elements().not(".hidden-label").filter(function (e) {
+      return e.isNode() || (!e.source().hasClass("hidden-label") && !e.target().hasClass("hidden-label"));
+    });
+    if (!shown.length) return;
+    var randomize = shown.nodes().length < 3;
+    var layout = shown.layout({ name: "cose", animate: false, randomize: randomize, fit: true, padding: 30,
+                                nodeRepulsion: 8000, idealEdgeLength: 80 });
     layout.one("layoutstop", function () {
       if (cy.zoom() > MAX_FIT_ZOOM) { cy.zoom(MAX_FIT_ZOOM); cy.center(); }
+      lodBaseZoom = cy.zoom();
+      rankNodes();
+      applyLevelOfDetail();
     });
     layout.run();
   }
@@ -549,8 +652,15 @@
 
   cy.on("tap", "node", function (event) { showDetail(event.target.data("nodeId")); });
   // Light layout: relation names only on the selected node's edges.
-  cy.on("select", "node", function (event) { event.target.connectedEdges().addClass("show-label"); });
-  cy.on("unselect", "node", function (event) { event.target.connectedEdges().removeClass("show-label"); });
+  cy.on("select", "node", function (event) {
+    event.target.connectedEdges().addClass("show-label");
+    scheduleLevelOfDetail();
+  });
+  cy.on("unselect", "node", function (event) {
+    event.target.connectedEdges().removeClass("show-label");
+    scheduleLevelOfDetail();
+  });
+  cy.on("zoom", scheduleLevelOfDetail);
 
   function setTableOpen(open) {
     document.body.classList.toggle("table-open", open);
@@ -614,8 +724,10 @@
   });
   $("graph-fit").addEventListener("click", function () { cy.fit(undefined, 30); });
   $("graph-layout").addEventListener("click", runLayout);
+  $("lod-toggle").addEventListener("change", applyLevelOfDetail);
   $("graph-reset").addEventListener("click", function () {
     cy.elements().remove();
+    lodRanked = null;
     $("graph-notice").hidden = true;
     updateGraphCount(false);
   });

@@ -71,9 +71,9 @@ def handle_api(data: GraphViewerData, path: str, query: Dict[str, List[str]]) ->
     if path == "/api/summary":
         return data.summary()
     if path == "/api/nodes":
-        label = _single(query, "label")
+        labels = [label for label in query.get("label", []) if label]
         return data.search(
-            label=label or None,
+            labels=labels,
             filters=_parse_filters(query.get("f", [])),
             text=_single(query, "q"),
             offset=_int_param(query, "offset", 0),

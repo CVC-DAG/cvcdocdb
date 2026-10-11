@@ -135,6 +135,12 @@ def test_invalid_layout_or_accent_is_rejected(store):
         create_server(store, port=0, accent="javascript:alert(1)")
 
 
+def test_nodes_endpoint_accepts_several_labels(server):
+    status, _, payload = _request(server, "/api/nodes?label=Person&label=City")
+    assert status == 200
+    assert {item["main_label"] for item in json.loads(payload)["items"]} == {"Person", "City"}
+
+
 def test_relations_endpoint(server):
     nodes = json.loads(_request(server, "/api/nodes?label=Person")[2])["items"]
     ids = "&".join(f"ids={n['id']}" for n in nodes)
