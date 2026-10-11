@@ -82,7 +82,7 @@ autodoc_typehints = "description"  # Show types in descriptions, not signatures
 autodoc_typehints_description_target = "all"
 
 # Mock optional dependencies so autodoc doesn't fail on missing neo4j/rdflib
-autodoc_mock_imports = ["neo4j", "rdflib"]
+autodoc_mock_imports = ["neo4j", "rdflib", "anywidget"]
 
 # Intersphinx mapping
 intersphinx_mapping = {

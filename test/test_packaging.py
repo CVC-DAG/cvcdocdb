@@ -27,7 +27,17 @@ EXTRAS = {
     "vector": {"hnswlib"},
     "torch": {"torch", "torch-geometric"},
     "graphrag": {"neo4j-graphrag"},
+    "notebook": {"anywidget"},
 }
+# Files the graph viewer (cvcdocdb.viewer) serves.
+VIEWER_STATIC_FILES = (
+    "index.html",
+    "viewer.js",
+    "viewer.css",
+    "widget.js",
+    "vendor/cytoscape.min.js",
+    "vendor/cytoscape.LICENSE.txt",
+)
 # Development-only tools listed in requirements.txt: never runtime deps.
 DEV_ONLY = {"sphinx", "sphinx-rtd-theme", "nbsphinx", "notebook", "ipykernel", "ipywidgets", "matplotlib"}
 
@@ -40,7 +50,7 @@ def _name(requirement: str) -> str:
 
 
 @pytest.fixture(scope="module")
-def wheel_metadata(tmp_path_factory):
+def built_wheel(tmp_path_factory):
     # Build from a copy: building in place rewrites the source tree's
     # *.egg-info, which an editable install reads its metadata from.
     src = tmp_path_factory.mktemp("src") / "cvcdocdb"
@@ -55,7 +65,12 @@ def wheel_metadata(tmp_path_factory):
         capture_output=True,
     )
     [wheel] = [p for p in out.iterdir() if p.suffix == ".whl"]
-    with zipfile.ZipFile(wheel) as zf:
+    return wheel
+
+
+@pytest.fixture(scope="module")
+def wheel_metadata(built_wheel):
+    with zipfile.ZipFile(built_wheel) as zf:
         [meta] = [n for n in zf.namelist() if n.endswith(".dist-info/METADATA")]
         return email.message_from_bytes(zf.read(meta))
 
@@ -84,6 +99,16 @@ def test_wheel_declares_optional_extras(wheel_metadata):
 def test_wheel_has_no_development_only_dependencies(wheel_metadata):
     declared = {_name(r) for r in wheel_metadata.get_all("Requires-Dist", [])}
     assert not declared & DEV_ONLY
+
+
+@pytest.mark.unit
+def test_wheel_ships_graph_viewer_static_files(built_wheel):
+    """The viewer's page, scripts and vendored cytoscape.js (with its license)
+    must be inside the wheel, or ``python -m cvcdocdb.viewer`` serves 404s."""
+    with zipfile.ZipFile(built_wheel) as zf:
+        names = set(zf.namelist())
+    for name in VIEWER_STATIC_FILES:
+        assert f"cvcdocdb/viewer/static/{name}" in names, name
 
 
 @pytest.mark.unit

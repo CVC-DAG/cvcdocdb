@@ -209,6 +209,25 @@ def scenario_create_group_then_propagated_delete(graph: Any) -> List[Outcome]:
     return outcomes
 
 
+def scenario_create_group_nested_then_propagated_delete(graph: Any) -> List[Outcome]:
+    """create_group amb un WeakNode niat: la pàgina penja de la secció, no
+    del document, i esborrar la secció amb propagació s'emporta la pàgina."""
+    doc, sec, page = document_tree()
+    outcomes = [attempt(lambda: graph.create_group(doc, weak_nodes=[sec, page]))]
+    outcomes.append(attempt(lambda: graph.deleteNode(sec, propagation=True, detach=True)))
+    return outcomes
+
+
+def scenario_create_group_children_before_parents(graph: Any) -> List[Outcome]:
+    doc, sec, page = document_tree()
+    return [attempt(lambda: graph.create_group(doc, weak_nodes=[page, sec]))]
+
+
+def scenario_create_group_parent_outside_group_is_refused(graph: Any) -> List[Outcome]:
+    doc, _, page = document_tree()
+    return [attempt(lambda: graph.create_group(doc, weak_nodes=[page]))]
+
+
 def scenario_init_propagation_marks_weak_edges(graph: Any) -> List[Outcome]:
     _, _, page = document_tree()
     graph.insertNode(page)
@@ -250,6 +269,9 @@ SCENARIOS = [
     scenario_relation_update_and_replace,
     scenario_failed_insert_inside_batch_rolls_back,
     scenario_create_group_then_propagated_delete,
+    scenario_create_group_nested_then_propagated_delete,
+    scenario_create_group_children_before_parents,
+    scenario_create_group_parent_outside_group_is_refused,
     scenario_init_propagation_marks_weak_edges,
     scenario_init_propagation_marks_edges_into_weak_nodes,
 ]

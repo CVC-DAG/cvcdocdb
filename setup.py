@@ -43,6 +43,8 @@ EXTRAS_REQUIRE = {
     "torch": ["torch", "torch_geometric"],
     # Natural-language → Cypher (cvcdocdb.text2cypher); needs Python >= 3.10.
     "graphrag": ["neo4j-graphrag>=1.21,<2"],
+    # The graph viewer as a Jupyter widget (cvcdocdb.viewer.show).
+    "notebook": ["anywidget>=0.9"],
 }
 
 
@@ -58,6 +60,8 @@ setup(
     license=LICENSE,
     packages=PACKAGES,
     package_dir={"": "."},
+    # The graph viewer's page, scripts and vendored cytoscape.js (+ license).
+    package_data={"cvcdocdb.viewer": ["static/*.html", "static/*.js", "static/*.css", "static/vendor/*"]},
     install_requires=INSTALL_REQUIRES,
     extras_require=EXTRAS_REQUIRE,
     keywords=["document representation", "knowledge graph", "neo4j", "memgraph", "networkx", "sparql", "jena", "rdf", "document analysis"],

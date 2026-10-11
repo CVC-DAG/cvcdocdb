@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>cvcdocdb graph viewer</title>
+  <link rel="stylesheet" href="static/viewer.css">
+</head>
+<body>
+  <header class="topbar">
+    <h1>cvcdocdb <span>graph viewer</span></h1>
+    <div id="store-info" class="muted">Loading…</div>
+    <div class="read-only-badge" title="This viewer never writes to the graph">read-only</div>
+  </header>
+
+  <div id="error-banner" class="banner error" hidden></div>
+
+  <div class="layout">
+    <aside class="sidebar">
+      <form id="search-form" class="search" autocomplete="off">
+        <label for="search-text" class="section-title">Search</label>
+        <div class="row">
+          <input id="search-text" type="search" placeholder="Text in any property…" maxlength="200">
+          <button type="submit">Go</button>
+        </div>
+      </form>
+
+      <section>
+        <div class="section-title">Node labels</div>
+        <ul id="label-list" class="facet-list"></ul>
+      </section>
+
+      <section>
+        <div class="section-title">Relation types</div>
+        <ul id="relation-list" class="facet-list"></ul>
+        <p class="hint">Unticked types are hidden in the graph and not followed when expanding.</p>
+      </section>
+    </aside>
+
+    <main class="main">
+      <section class="panel results-panel">
+        <div class="filter-bar">
+          <div id="filter-chips" class="chips"></div>
+          <form id="filter-form" class="filter-form" autocomplete="off">
+            <input id="filter-prop" list="known-props" placeholder="property" maxlength="128" required>
+            <datalist id="known-props"></datalist>
+            <select id="filter-op" aria-label="Operator">
+              <option value="eq">=</option>
+              <option value="ne">≠</option>
+              <option value="contains">contains</option>
+              <option value="gt">&gt;</option>
+              <option value="gte">≥</option>
+              <option value="lt">&lt;</option>
+              <option value="lte">≤</option>
+              <option value="exists">exists</option>
+            </select>
+            <input id="filter-value" placeholder="value" maxlength="200">
+            <button type="submit">Add filter</button>
+          </form>
+        </div>
+
+        <div class="table-wrap">
+          <table id="results-table">
+            <thead><tr><th>Node</th><th>Label</th><th>Properties</th><th></th></tr></thead>
+            <tbody></tbody>
+          </table>
+          <p id="results-empty" class="muted center" hidden>No nodes match.</p>
+        </div>
+
+        <div class="pager">
+          <button id="page-prev" type="button">‹ Prev</button>
+          <span id="page-info" class="muted"></span>
+          <button id="page-next" type="button">Next ›</button>
+          <label class="muted">per page
+            <select id="page-size">
+              <option>25</option><option selected>50</option><option>100</option><option>200</option>
+            </select>
+          </label>
+          <button id="add-page-to-graph" type="button" class="secondary">Add page to graph</button>
+        </div>
+      </section>
+
+      <section class="panel graph-panel">
+        <div class="graph-toolbar">
+          <button id="graph-refresh" type="button" class="secondary" title="Read the graph store again">Refresh</button>
+          <button id="graph-fit" type="button" class="secondary">Fit</button>
+          <button id="graph-layout" type="button" class="secondary">Re-layout</button>
+          <button id="graph-reset" type="button" class="secondary">Clear graph</button>
+          <label class="muted">expand
+            <select id="expand-direction">
+              <option value="both">both directions</option>
+              <option value="out">outgoing</option>
+              <option value="in">incoming</option>
+            </select>
+          </label>
+          <span id="graph-count" class="muted"></span>
+        </div>
+        <div id="graph-notice" class="banner warn" hidden></div>
+        <div class="graph-and-detail">
+          <div id="cy" aria-label="Graph canvas"></div>
+          <div id="detail" class="detail">
+            <p class="muted">Click a node in the graph or a row in the table to see its properties.</p>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="static/vendor/cytoscape.min.js"></script>
+  <script src="static/viewer.js"></script>
+</body>
+</html>

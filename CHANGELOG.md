@@ -7,6 +7,68 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Interactive graph viewer: `cvcdocdb.viewer`.** A read-only web page to
+  browse the data of any `GraphStore` backend (`NetworkXGraph`, `Neo4jGraph`,
+  `MemgraphGraph`, `JenaGraph`): node labels with counts, relation types,
+  search by label, property filters (chips) and free text with paging, node
+  detail, and a graph canvas where nodes can be expanded to their neighbours
+  (optional relation-type filter, cap on rendered nodes). Launch it with
+  `serve_viewer(store)` or `python -m cvcdocdb.viewer graph.pkl`
+  (`--backend neo4j|memgraph|jena --url ...` for a remote store). It uses only
+  the standard library (`http.server`): GET-only JSON API, bound to
+  `127.0.0.1` by default, optional token (`--token` /
+  `CVCDOCDB_VIEWER_TOKEN`), validated and capped inputs, and reads only
+  through the store's public API (dict filters, fixed parametrised read
+  queries). The page works offline with a vendored cytoscape.js 3.30.2
+  (MIT, license shipped next to it). Additive: no existing API changes and no
+  new mandatory dependencies.
+- **Graph viewer in Jupyter notebooks: `cvcdocdb.viewer.show(store)`.** The
+  same viewer as an [anywidget](https://anywidget.dev) widget
+  (`GraphViewerWidget`), with no HTTP server, so it can run wherever
+  anywidget does (JupyterLab, Notebook 7, VS Code, Colab; tested in
+  JupyterLab). The page runs in a sandboxed `iframe` with no
+  network access and asks the kernel for data through the widget; the kernel
+  answers with the same read-only API as the server (request routing now
+  shared in `cvcdocdb.viewer.api`). Needs the new optional extra
+  `pip install 'cvcdocdb[notebook]'`; `cvcdocdb.viewer` still imports without
+  it. `viewer.refresh()` updates every view after the graph changes from
+  Python, `show(store, load_all=True)` draws the whole graph (up to 300
+  nodes), and the viewer follows the notebook's light or dark theme. Both
+  versions of the viewer get a **Refresh** button.
+- **The tutorial notebooks use the viewer.** The WeakNode notebook
+  (`interactive/weaknodes.ipynb`) is now an editor: an ipywidgets control
+  panel adds and deletes nodes and the viewer shows each change (it replaces
+  a hand-made Cytoscape view that needed trusted JavaScript outputs). The
+  getting-started, dataset, delete-strategies and RiC-O (NetworkX) notebooks
+  open their graphs in the viewer, and their install cell installs
+  `cvcdocdb[notebook]`. New docs page: *Graph viewer*.
+- **Memgraph and Apache Jena tutorials.** `demos/memgraph_demo.ipynb` and
+  `demos/jena_demo.ipynb` run the workflow of the Neo4j propagation demo (load
+  Game of Thrones, schema and entity classes, `init_propagation()`,
+  `create_group()`, queries, subdocuments, viewer) on Memgraph and on Fuseki;
+  the Jena one queries the RDF in SPARQL, RDF 1.2 reifiers included, and the
+  in-memory copy in Cypher. The dataset notebooks also load their data into
+  `MemgraphGraph` and `JenaGraph`.
+
+### Fixed
+
+- **`create_group()` with nested WeakNodes** (a page under a section under the
+  document). Each WeakNode is now linked to its own parent, on every backend.
+  Before, `Neo4jGraph` and `MemgraphGraph` linked every WeakNode of the group
+  to the strong node (the page hung from the document and the section had no
+  pages), and `NetworkXGraph` and `JenaGraph` failed with a `KeyError` and
+  rolled the group back. The WeakNodes may now come in any order; a WeakNode
+  whose parent is neither the strong node nor another WeakNode of the group
+  raises `ValueError` before anything is written. Groups created earlier on
+  Neo4j or Memgraph keep the old structure.
+- **Delete-strategies tutorial.** The CASCADE step now passes `detach=True`
+  (without it `deleteNode()` refuses to delete a node that still has
+  relations, so the notebook stopped with a `RuntimeError`), and each run uses
+  its own temporary files, so running the notebook again no longer fails with
+  a duplicate key.
+
 ## [1.6.0] - 2026-10-02
 
 ### Changed

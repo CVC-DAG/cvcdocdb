@@ -23,6 +23,11 @@ Usage::
     # Run only Neo4j tests
     pytest test/ -v -m slow
 
+    # Only the tests for the files changed against HEAD (or another base),
+    # committed or not, plus untracked ones — see test/changed_selection.py
+    pytest test/ --changed
+    pytest test/ --changed=develop
+
 If no Neo4j server answers on ``NEO4J_DEV_URL``/``NEO4J_URL`` and Docker plus
 the ``testcontainers`` package are available, a disposable ``neo4j:5-community``
 container is started automatically (see ``_maybe_start_docker_neo4j`` below) so
@@ -292,8 +297,46 @@ def _maybe_start_docker_fuseki() -> None:
     print(f"[conftest] Started local Fuseki docker container ({_DOCKER_FUSEKI_IMAGE}) on {_DEFAULT_FUSEKI_URL}")
 
 
+def pytest_addoption(parser):
+    parser.addoption(
+        "--changed",
+        nargs="?",
+        const="HEAD",
+        default=None,
+        metavar="BASE",
+        help="Run only the tests for the files changed against BASE (default HEAD), "
+        "committed or not, plus untracked files. See test/changed_selection.py.",
+    )
+
+
+# Test files that can need a Neo4j, Memgraph or Fuseki server, by name.
+_SERVER_TEST_HINTS = ("neo4j", "memgraph", "jena", "contract", "migration", "propagation",
+                      "create_graph", "release")
+
+
+def _changed_selection(config):
+    """Selected test files under ``--changed`` (``None``: run everything)."""
+    base = config.getoption("--changed")
+    if base is None:
+        return None
+    from test.changed_selection import changed_files, select_test_files
+
+    test_dir = os.path.dirname(os.path.abspath(__file__))
+    root = os.path.dirname(test_dir)
+    changed = changed_files(root, base)
+    tests = sorted(f for f in os.listdir(test_dir) if f.startswith("test_") and f.endswith(".py"))
+    selected = select_test_files(changed, tests)
+    if selected is None:
+        print(f"[conftest] --changed={base}: {len(changed)} changed file(s) need the whole suite")
+    else:
+        print(f"[conftest] --changed={base}: {len(changed)} changed file(s) -> "
+              f"{', '.join(sorted(selected)) or 'no tests'}")
+    return selected
+
+
 def pytest_configure(config):
     """Register custom markers and (if needed) start a local Neo4j container."""
+    config._changed_selection = _changed_selection(config)
     _preimport_neo4j_graphrag()
     config.addinivalue_line(
         "markers", "unit: fast tests with no graph store"
@@ -310,6 +353,9 @@ def pytest_configure(config):
         "schema codegen) — run only on main, right before publishing a "
         "new version. See test/README.md.",
     )
+    selected = config._changed_selection
+    if selected is not None and not any(h in f for f in selected for h in _SERVER_TEST_HINTS):
+        return  # no selected test talks to a server: don't start containers
     _maybe_start_docker_neo4j()
     _maybe_start_docker_memgraph()
     _maybe_start_docker_fuseki()
@@ -344,6 +390,14 @@ def pytest_collection_modifyitems(config, items):
     release_files = {
         "test_release_schema_migration.py",
     }
+
+    selected = config._changed_selection
+    if selected is not None:
+        kept = [item for item in items if item.fspath.basename in selected]
+        deselected = [item for item in items if item.fspath.basename not in selected]
+        if deselected:
+            config.hook.pytest_deselected(items=deselected)
+            items[:] = kept
 
     neo4j_ok = _neo4j_reachable()
     memgraph_ok = _memgraph_reachable()

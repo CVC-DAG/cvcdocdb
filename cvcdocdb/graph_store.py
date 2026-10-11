@@ -31,6 +31,41 @@ class GraphLockTimeout(TimeoutError):
     instance is holding it, typically a long or stuck write/migration."""
 
 
+def _group_key(node: Node) -> Tuple[Any, str]:
+    pk, _ = node.attributes
+    return node.get("main_label"), repr(sorted((pk or {}).items()))
+
+
+def weak_nodes_in_creation_order(strong_node: Node, weak_nodes: Optional[List[Node]]) -> List[Tuple[Node, Node]]:
+    """The ``(weak_node, parent)`` pairs of a ``create_group`` call, parents first.
+
+    Each WeakNode hangs from its own parent: the strong node or another
+    WeakNode of the group (a page from its section, not from the document),
+    matched by identity or by main label and primary key. The list may come
+    in any order.
+
+    Raises:
+        ValueError: If a WeakNode's parent is not part of the group.
+    """
+    created = {_group_key(strong_node): strong_node}
+    pending = list(weak_nodes or [])
+    ordered: List[Tuple[Node, Node]] = []
+    while pending:
+        ready = [wn for wn in pending if _group_key(wn._parent) in created]
+        if not ready:
+            wn = pending[0]
+            raise ValueError(
+                f"The parent of WeakNode {wn.get('main_label')} is not part of the group: "
+                "it must be the strong node or another WeakNode in weak_nodes"
+            )
+        for wn in ready:
+            ordered.append((wn, created[_group_key(wn._parent)]))
+            created[_group_key(wn)] = wn
+        ready_ids = {id(wn) for wn in ready}
+        pending = [wn for wn in pending if id(wn) not in ready_ids]
+    return ordered
+
+
 class GraphStore(ABC):
     """Abstract interface for graph-backed stores (Neo4j, NetworkX, etc.).
 
