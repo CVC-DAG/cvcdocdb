@@ -44,9 +44,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   getting-started, dataset, delete-strategies and RiC-O (NetworkX) notebooks
   open their graphs in the viewer, and their install cell installs
   `cvcdocdb[notebook]`. New docs page: *Graph viewer*.
+- **Memgraph and Apache Jena tutorials.** `demos/memgraph_demo.ipynb` and
+  `demos/jena_demo.ipynb` run the workflow of the Neo4j propagation demo (load
+  Game of Thrones, schema and entity classes, `init_propagation()`,
+  `create_group()`, queries, subdocuments, viewer) on Memgraph and on Fuseki;
+  the Jena one queries the RDF in SPARQL, RDF 1.2 reifiers included, and the
+  in-memory copy in Cypher. The dataset notebooks also load their data into
+  `MemgraphGraph` and `JenaGraph`.
 
 ### Fixed
 
+- **`create_group()` with nested WeakNodes** (a page under a section under the
+  document). Each WeakNode is now linked to its own parent, on every backend.
+  Before, `Neo4jGraph` and `MemgraphGraph` linked every WeakNode of the group
+  to the strong node (the page hung from the document and the section had no
+  pages), and `NetworkXGraph` and `JenaGraph` failed with a `KeyError` and
+  rolled the group back. The WeakNodes may now come in any order; a WeakNode
+  whose parent is neither the strong node nor another WeakNode of the group
+  raises `ValueError` before anything is written. Groups created earlier on
+  Neo4j or Memgraph keep the old structure.
 - **Delete-strategies tutorial.** The CASCADE step now passes `detach=True`
   (without it `deleteNode()` refuses to delete a node that still has
   relations, so the notebook stopped with a `RuntimeError`), and each run uses

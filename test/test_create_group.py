@@ -7,6 +7,8 @@ import time
 import unittest
 from typing import Any, Dict, List, Optional, Tuple
 
+import pytest
+
 from cvcdocdb.base import Node, Relation, WeakNode, WeakRelation
 from cvcdocdb.networkx_graph import NetworkXGraph
 
@@ -348,3 +350,117 @@ class TestGraphStoreContract(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# ======================================================================
+# create_group with nested WeakNodes (Document → Section → Page)
+# ======================================================================
+
+
+def _nested_group(doc_id: str) -> Tuple[Node, WeakNode, WeakNode]:
+    doc = Node(pk={"doc_id": doc_id}, main_label="Document")
+    sec = WeakNode(parent=doc, parent_relation="HAS_SECTION", pk={"section": "intro"}, main_label="Section")
+    page = WeakNode(parent=sec, parent_relation="HAS_PAGE", pk={"page": 1}, main_label="Page")
+    return doc, sec, page
+
+
+# Each WeakNode hangs from its own parent: the page from the section.
+EXPECTED_NESTED_EDGES = {
+    ("Document", "HAS_SECTION", "Section", True, "HAS_SECTION"),
+    ("Section", "HAS_PAGE", "Page", True, "HAS_PAGE"),
+}
+
+
+class TestCreateGroupNestedNetworkX(unittest.TestCase):
+    """create_group links each WeakNode to its own parent on NetworkXGraph."""
+
+    def setUp(self) -> None:
+        import os
+        import tempfile
+
+        self.graph = NetworkXGraph(persistence_path=os.path.join(tempfile.mkdtemp(), "nested.pkl"))
+
+    def tearDown(self) -> None:
+        self.graph.close()
+
+    def _edges(self) -> set:
+        label = lambda nid: self.graph.get_node_attrs(nid)["main_label"]  # noqa: E731
+        edges = set()
+        for src, dst, rel_type in self.graph.get_edges():
+            attrs = self.graph.get_edge_attrs(src, dst, rel_type)
+            edges.add((label(src), rel_type, label(dst), attrs.get("_propagate"), attrs.get("parent_relation")))
+        return edges
+
+    def test_nested_weak_node_is_linked_to_its_own_parent(self) -> None:
+        doc, sec, page = _nested_group("NESTED-NX")
+        self.graph.create_group(doc, weak_nodes=[sec, page])
+        self.assertEqual(self.graph.count(), 3)
+        self.assertEqual(self._edges(), EXPECTED_NESTED_EDGES)
+
+    def test_nested_weak_nodes_are_initialised(self) -> None:
+        doc, sec, page = _nested_group("NESTED-NX")
+        doc_id = self.graph.create_group(doc, weak_nodes=[sec, page])
+        for node, rel_type in ((sec, "HAS_SECTION"), (page, "HAS_PAGE")):
+            attrs = self.graph.get_node_attrs(self.graph.checkNode(node))
+            self.assertTrue(attrs["is_weak"])
+            self.assertEqual(attrs["parent_relation"], rel_type)
+        self.assertTrue(self.graph.get_node_attrs(doc_id)["_weak_init_done"])
+
+    def test_nested_group_subdocuments_and_propagated_delete(self) -> None:
+        doc, sec, page = _nested_group("NESTED-NX")
+        self.graph.create_group(doc, weak_nodes=[sec, page])
+        labels = sorted(sd["label"] for sd in self.graph.get_subdocuments(doc))
+        self.assertEqual(labels, ["Page", "Section"])
+        self.graph.deleteNode(sec, propagation=True, detach=True)
+        self.assertIsNone(self.graph.checkNode(page))
+        self.assertIsNotNone(self.graph.checkNode(doc))
+
+
+    def test_children_may_come_before_their_parents(self) -> None:
+        doc, sec, page = _nested_group("NESTED-NX")
+        self.graph.create_group(doc, weak_nodes=[page, sec])
+        self.assertEqual(self._edges(), EXPECTED_NESTED_EDGES)
+
+    def test_parent_outside_the_group_is_refused_without_writing(self) -> None:
+        doc, sec, page = _nested_group("NESTED-NX")
+        with self.assertRaises(ValueError):
+            self.graph.create_group(doc, weak_nodes=[page])  # its section is missing
+        self.assertEqual(self.graph.count(), 0)
+
+
+@pytest.mark.slow
+class TestCreateGroupNestedNeo4j(unittest.TestCase):
+    """create_group links each WeakNode to its own parent on a real Neo4j
+    (needs NEO4J_DEV_URL). Only touches the nodes of its own document."""
+
+    def setUp(self) -> None:
+        import os
+        import uuid
+
+        if not os.environ.get("NEO4J_DEV_URL"):
+            self.skipTest("Sense NEO4J_DEV_URL: cal un Neo4j real")
+        from cvcdocdb.neo4j_graph import Neo4jGraph
+
+        self.graph = Neo4jGraph(
+            os.environ["NEO4J_DEV_URL"],
+            os.environ.get("NEO4J_DEV_USER", "neo4j"),
+            os.environ.get("NEO4J_DEV_PASSWORD", ""),
+            database=os.environ.get("NEO4J_DEV_DATABASE") or None,
+        )
+        self.doc_id = f"NESTED-{uuid.uuid4().hex}"
+
+    def tearDown(self) -> None:
+        self.graph.query("MATCH (n) WHERE n.doc_id = $id DETACH DELETE n", params={"id": self.doc_id})
+        self.graph.close()
+
+    def test_nested_weak_node_is_linked_to_its_own_parent(self) -> None:
+        doc, sec, page = _nested_group(self.doc_id)
+        self.graph.create_group(doc, weak_nodes=[sec, page])
+        rows = self.graph.query(
+            "MATCH (a)-[r]->(b) WHERE a.doc_id = $id AND b.doc_id = $id "
+            "RETURN labels(a)[0] AS a, type(r) AS t, labels(b)[0] AS b, "
+            "r._propagate AS propagate, r.parent_relation AS parent_relation",
+            params={"id": self.doc_id},
+        )
+        edges = {(r["a"], r["t"], r["b"], r["propagate"], r["parent_relation"]) for r in rows}
+        self.assertEqual(edges, EXPECTED_NESTED_EDGES)

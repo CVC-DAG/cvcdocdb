@@ -25,7 +25,7 @@ except ImportError:  # pragma: no cover - guarded at runtime in __init__
     FileLockTimeout = None
 
 from .base import Node, Relation, WeakRelation
-from .graph_store import GraphLockTimeout, GraphStore
+from .graph_store import GraphLockTimeout, GraphStore, weak_nodes_in_creation_order
 
 # filelock's "wait forever" value for acquire(timeout=...).
 _WAIT_FOREVER = -1
@@ -930,6 +930,9 @@ class NetworkXGraph(GraphStore):
         Raises:
             RuntimeError: If any part of the group creation fails.
         """
+        # Each WeakNode hangs from its own parent (strong node or another
+        # WeakNode of the group); parents are inserted before their children.
+        ordered = weak_nodes_in_creation_order(strong_node, weak_nodes)
         with self._guarded_write():
             # Snapshot current state for rollback on failure
             snapshot = self._snapshot()
@@ -938,10 +941,9 @@ class NetworkXGraph(GraphStore):
                 # 1. Insert the strong node
                 strong_id = self.insertNode(strong_node, insert_parent=False, update=False, replace=False)
 
-                # 2. Insert weak nodes (they reference the strong node as parent)
-                if weak_nodes:
-                    for wn in weak_nodes:
-                        self.insertNode(wn, insert_parent=True, update=False, replace=False)
+                # 2. Insert weak nodes, each linked to its own parent
+                for wn, _ in ordered:
+                    self.insertNode(wn, insert_parent=True, update=False, replace=False)
 
                 # 3. Insert weak relations
                 if weak_relations:
@@ -950,12 +952,12 @@ class NetworkXGraph(GraphStore):
 
                 # 4. Els fills queden inicialitzats com ho faria
                 #    init_propagation(), i el pare marcat com a processat.
-                for wn in weak_nodes or []:
+                for wn, parent in ordered:
                     rel_type = wn["parent_relation"]
                     self._set_node_properties(
                         wn.neo4j_id, {"is_weak": True, "_propagate": True, "parent_relation": rel_type}
                     )
-                    self._edge_attrs[(strong_id, wn.neo4j_id, rel_type)]["parent_relation"] = rel_type
+                    self._edge_attrs[(parent.neo4j_id, wn.neo4j_id, rel_type)]["parent_relation"] = rel_type
                 self._set_node_properties(strong_id, {"_weak_init_done": True})
 
                 return strong_id

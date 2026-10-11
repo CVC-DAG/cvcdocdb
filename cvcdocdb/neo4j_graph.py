@@ -38,6 +38,7 @@ def _notification_filter_api() -> "Tuple[Any, str]":
 _DisabledNotification, _DISABLED_NOTIFICATIONS_KEY = _notification_filter_api()
 from neo4j.exceptions import ConstraintError, Forbidden, TransactionError
 from . import Node, Relation, WeakRelation
+from .graph_store import weak_nodes_in_creation_order
 from .neo4j_enterprise import (
     COMMUNITY_EDITION,
     ENTERPRISE_EDITION,
@@ -1214,6 +1215,10 @@ class Neo4jGraph(Neo4jEnterpriseMixin):
                 if lbl:
                     _validate_cypher_identifier(lbl, "main_label")
 
+        # Each WeakNode hangs from its own parent (strong node or another
+        # WeakNode of the group); parents are created before their children.
+        ordered = weak_nodes_in_creation_order(strong_node, weak_nodes)
+
         session = self._session
 
         def _create_group_tx(tx: Any) -> int:
@@ -1228,9 +1233,9 @@ class Neo4jGraph(Neo4jEnterpriseMixin):
             ).value("id")[0]
             strong_node["neo4j_id"] = result
 
-            # 2. Create weak nodes and their parent relations
-            if weak_nodes:
-                for wn in weak_nodes:
+            # 2. Create weak nodes and the relations from their parents
+            if ordered:
+                for wn, parent in ordered:
                     wn_pk, wn_attrs = wn.attributes
                     wn_props = wn_attrs if wn_pk is None else {**wn_pk, **wn_attrs}
                     wn_labels = "" if wn.labels == "" else ":" + ":".join(wn.labels)
@@ -1241,7 +1246,7 @@ class Neo4jGraph(Neo4jEnterpriseMixin):
                     ).value("id")[0]
                     wn["neo4j_id"] = wn_result
 
-                    # Create the WeakRelation edge from strong_node to weak node
+                    # Create the WeakRelation edge from the parent to the weak node
                     rel_type = wn.get("parent_relation", "HAS_CHILD")
                     # Fill inicialitzat com ho faria init_propagation().
                     tx.run(
@@ -1250,7 +1255,7 @@ class Neo4jGraph(Neo4jEnterpriseMixin):
                         "CREATE (a)-[r:" + rel_type + "]->(b) "
                         "SET r._propagate = TRUE, r.parent_relation = $rel_type, "
                         "b.is_weak = TRUE, b._propagate = TRUE, b.parent_relation = $rel_type",
-                        parent_id=strong_node["neo4j_id"],
+                        parent_id=parent["neo4j_id"],
                         child_id=wn_result,
                         rel_type=rel_type,
                     )
