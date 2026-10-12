@@ -70,6 +70,7 @@ class GraphViewerWidget(anywidget.AnyWidget):
         load_all: Show the whole graph on the canvas (up to 300 nodes) and
             keep it whole on :meth:`refresh` — for small graphs, such as a
             tutorial's.
+        language: Interface language: ``"en"`` (default), ``"ca"`` or ``"es"``.
 
     The viewer reads the store when the user asks for something. After
     changing the graph from Python, call :meth:`refresh` to update it.
@@ -81,8 +82,8 @@ class GraphViewerWidget(anywidget.AnyWidget):
     _page = traitlets.Unicode("").tag(sync=True)
 
     def __init__(self, store: Union[GraphStore, GraphViewerData], height: int = DEFAULT_HEIGHT,
-                 load_all: bool = False, **kwargs: Any) -> None:
-        super().__init__(height=height, load_all=load_all, _page=build_page(), **kwargs)
+                 load_all: bool = False, language: str = "en", **kwargs: Any) -> None:
+        super().__init__(height=height, load_all=load_all, _page=build_page(language=language), **kwargs)
         self.data = store if isinstance(store, GraphViewerData) else GraphViewerData(store)
         self.on_msg(self._handle_message)
 

@@ -67,7 +67,8 @@ def test_handle_api_node_and_neighbours(data):
     "path, query",
     [
         ("/api/nodes", {"limit": ["many"]}),
-        ("/api/nodes", {"label": ["Person", "City"]}),
+        # Several labels are allowed (node-type filter); a bad one still is not.
+        ("/api/nodes", {"label": ["Person", "Pers on!"]}),
         ("/api/nodes", {"f": ["no-operator"]}),
         ("/api/nodes/abc", {}),
     ],

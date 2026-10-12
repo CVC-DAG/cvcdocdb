@@ -15,6 +15,9 @@ pytestmark = pytest.mark.integration
 STATIC_FILES = (
     "index.html",
     "viewer.js",
+    "physics.js",
+    "lod.js",
+    "i18n.js",
     "viewer.css",
     "vendor/cytoscape.min.js",
     "vendor/cytoscape.LICENSE.txt",
@@ -37,7 +40,7 @@ def test_vendored_cytoscape_keeps_its_license_notice():
 
 def test_front_end_makes_no_external_requests():
     static = resources.files("cvcdocdb.viewer") / "static"
-    for name in ("index.html", "viewer.js", "viewer.css"):
+    for name in ("index.html", "viewer.js", "physics.js", "lod.js", "i18n.js", "viewer.css"):
         text = (static / name).read_text("utf-8")
         assert "http://" not in text and "https://" not in text, name
 
@@ -60,7 +63,8 @@ def test_cli_opens_a_networkx_pickle(tmp_path, monkeypatch):
     assert calls["token"] is None
     assert calls["open_browser"] is False
     assert calls["labels"] == ["Person"]
-    assert calls["options"] == {"layout": "classic", "load_all": False, "accent": None, "extra_css": None}
+    assert calls["options"] == {"layout": "classic", "load_all": False, "accent": None, "extra_css": None,
+                                "language": "en"}
 
 
 def test_cli_missing_pickle_is_an_error(tmp_path, capsys):

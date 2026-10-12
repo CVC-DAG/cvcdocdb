@@ -8,9 +8,9 @@
 </head>
 <body>
   <header class="topbar">
-    <h1>cvcdocdb <span>graph viewer</span></h1>
-    <div id="store-info" class="muted">Loading…</div>
-    <div class="read-only-badge" title="This viewer never writes to the graph">read-only</div>
+    <h1>cvcdocdb <span data-i18n="app.subtitle">graph viewer</span></h1>
+    <div id="store-info" class="muted" data-i18n="status.loading">Loading…</div>
+    <div class="read-only-badge" title="This viewer never writes to the graph" data-i18n="badge.read_only" data-i18n-title="badge.read_only_title">read-only</div>
   </header>
 
   <div id="error-banner" class="banner error" hidden></div>
@@ -18,23 +18,23 @@
   <div class="layout">
     <aside class="sidebar">
       <form id="search-form" class="search" autocomplete="off">
-        <label for="search-text" class="section-title">Search</label>
+        <label for="search-text" class="section-title" data-i18n="search.title">Search</label>
         <div class="row">
-          <input id="search-text" type="search" placeholder="Text in any property…" maxlength="200">
-          <button type="submit">Go</button>
+          <input id="search-text" type="search" placeholder="Text in any property…" data-i18n-placeholder="search.placeholder" maxlength="200">
+          <button type="submit" data-i18n="search.go">Go</button>
         </div>
       </form>
 
       <section>
-        <div class="section-title">Node labels</div>
+        <div class="section-title" data-i18n="labels.title">Node labels</div>
         <ul id="label-list" class="facet-list"></ul>
-        <p class="hint">Click one or more types to show only those in the table and the graph.</p>
+        <p class="hint" data-i18n="labels.hint">Click one or more types to show only those in the table and the graph.</p>
       </section>
 
       <section>
-        <div class="section-title">Relation types</div>
+        <div class="section-title" data-i18n="relations.title">Relation types</div>
         <ul id="relation-list" class="facet-list"></ul>
-        <p class="hint">Unticked types are hidden in the graph and not followed when expanding.</p>
+        <p class="hint" data-i18n="relations.hint">Unticked types are hidden in the graph and not followed when expanding.</p>
       </section>
     </aside>
 
@@ -43,70 +43,73 @@
         <div class="filter-bar">
           <div id="filter-chips" class="chips"></div>
           <form id="filter-form" class="filter-form" autocomplete="off">
-            <input id="filter-prop" list="known-props" placeholder="property" maxlength="128" required>
+            <input id="filter-prop" list="known-props" placeholder="property" data-i18n-placeholder="filter.property" maxlength="128" required>
             <datalist id="known-props"></datalist>
-            <select id="filter-op" aria-label="Operator">
+            <select id="filter-op" aria-label="Operator" data-i18n-aria-label="filter.operator">
               <option value="eq">=</option>
               <option value="ne">≠</option>
-              <option value="contains">contains</option>
+              <option value="contains" data-i18n="op.contains">contains</option>
               <option value="gt">&gt;</option>
               <option value="gte">≥</option>
               <option value="lt">&lt;</option>
               <option value="lte">≤</option>
-              <option value="exists">exists</option>
+              <option value="exists" data-i18n="op.exists">exists</option>
             </select>
-            <input id="filter-value" placeholder="value" maxlength="200">
-            <button type="submit">Add filter</button>
+            <input id="filter-value" placeholder="value" data-i18n-placeholder="filter.value" maxlength="200">
+            <button type="submit" data-i18n="filter.add">Add filter</button>
           </form>
         </div>
 
         <div class="table-wrap">
           <table id="results-table">
-            <thead><tr><th>Node</th><th>Label</th><th>Properties</th><th></th></tr></thead>
+            <thead><tr><th data-i18n="table.node">Node</th><th data-i18n="table.label">Label</th><th data-i18n="table.properties">Properties</th><th></th></tr></thead>
             <tbody></tbody>
           </table>
-          <p id="results-empty" class="muted center" hidden>No nodes match.</p>
+          <p id="results-empty" class="muted center" data-i18n="table.empty" hidden>No nodes match.</p>
         </div>
 
         <div class="pager">
-          <button id="page-prev" type="button">‹ Prev</button>
+          <button id="page-prev" type="button" data-i18n="pager.prev">‹ Prev</button>
           <span id="page-info" class="muted"></span>
-          <button id="page-next" type="button">Next ›</button>
-          <label class="muted">per page
+          <button id="page-next" type="button" data-i18n="pager.next">Next ›</button>
+          <label class="muted"><span data-i18n="pager.per_page">per page</span>
             <select id="page-size">
               <option>25</option><option selected>50</option><option>100</option><option>200</option>
             </select>
           </label>
-          <button id="add-page-to-graph" type="button" class="secondary">Add page to graph</button>
+          <button id="add-page-to-graph" type="button" class="secondary" data-i18n="pager.add_page">Add page to graph</button>
         </div>
       </section>
 
       <section class="panel graph-panel">
         <div class="graph-toolbar">
-          <button id="toggle-table" type="button" class="secondary light-only" aria-expanded="false" title="Show the search results as a table">Table</button>
-          <button id="graph-refresh" type="button" class="secondary" title="Read the graph store again">Refresh</button>
-          <button id="graph-fit" type="button" class="secondary">Fit</button>
-          <button id="graph-layout" type="button" class="secondary">Re-layout</button>
-          <button id="graph-reset" type="button" class="secondary">Clear graph</button>
-          <label class="muted">expand
+          <button id="toggle-table" type="button" class="secondary light-only" aria-expanded="false" title="Show the search results as a table" data-i18n="toolbar.table" data-i18n-title="toolbar.table_title">Table</button>
+          <button id="graph-refresh" type="button" class="secondary" title="Read the graph store again" data-i18n="toolbar.refresh" data-i18n-title="toolbar.refresh_title">Refresh</button>
+          <button id="graph-fit" type="button" class="secondary" data-i18n="toolbar.fit">Fit</button>
+          <button id="graph-layout" type="button" class="secondary" data-i18n="toolbar.relayout">Re-layout</button>
+          <button id="graph-reset" type="button" class="secondary" data-i18n="toolbar.clear">Clear graph</button>
+          <label class="muted"><span data-i18n="toolbar.expand">expand</span>
             <select id="expand-direction">
-              <option value="both">both directions</option>
-              <option value="out">outgoing</option>
-              <option value="in">incoming</option>
+              <option value="both" data-i18n="toolbar.both">both directions</option>
+              <option value="out" data-i18n="toolbar.out">outgoing</option>
+              <option value="in" data-i18n="toolbar.in">incoming</option>
             </select>
           </label>
-          <label class="muted" title="With many nodes, show the most connected ones when zoomed out and the rest as you zoom in">
-            <input id="lod-toggle" type="checkbox" checked> detail by zoom
+          <label class="muted" title="With many nodes, show the most connected ones when zoomed out and the rest as you zoom in" data-i18n-title="toolbar.lod_title">
+            <input id="lod-toggle" type="checkbox" checked> <span data-i18n="toolbar.lod">detail by zoom</span>
+          </label>
+          <label class="muted" title="Nodes keep apart, and moving one makes the others make way" data-i18n-title="toolbar.physics_title">
+            <input id="physics-toggle" type="checkbox" checked> <span data-i18n="toolbar.physics">repel nodes</span>
           </label>
           <span id="graph-count" class="muted"></span>
         </div>
         <div id="graph-notice" class="banner warn" hidden></div>
         <div class="graph-and-detail">
-          <div id="cy" aria-label="Graph canvas"></div>
+          <div id="cy" aria-label="Graph canvas" data-i18n-aria-label="graph.canvas"></div>
           <div id="detail-drawer" class="detail-drawer">
-            <button id="detail-close" type="button" class="secondary light-only detail-close" aria-label="Close the details">×</button>
+            <button id="detail-close" type="button" class="secondary light-only detail-close" aria-label="Close the details" data-i18n-aria-label="detail.close">×</button>
             <div id="detail" class="detail">
-              <p class="muted">Click a node in the graph or a row in the table to see its properties.</p>
+              <p class="muted" data-i18n="detail.placeholder">Click a node in the graph or a row in the table to see its properties.</p>
             </div>
           </div>
         </div>
@@ -115,6 +118,9 @@
   </div>
 
   <script src="static/vendor/cytoscape.min.js"></script>
+  <script src="static/physics.js"></script>
+  <script src="static/lod.js"></script>
+  <script src="static/i18n.js"></script>
   <script src="static/viewer.js"></script>
 </body>
 </html>

@@ -211,15 +211,18 @@ canvas, and relation names only show on the selected node's edges.
 Clicking node labels in the sidebar filters the table and the graph by one or
 more node types. With many nodes, the canvas shows the most connected ones
 when zoomed out and the rest as you zoom in (**detail by zoom** in the graph
-toolbar turns it off).
+toolbar turns it off). The nodes repel each other, so they keep a distance;
+dragging one makes the others make way and pulls its neighbours along
+(**repel nodes** turns it off).
 `--load-all` draws the whole graph on start (one request for all its edges),
 `--accent '#00843D'` sets the accent colour and `--css FILE` adds a
 stylesheet after the viewer's own, e.g. to use your application's fonts and
 colours (the page uses CSS variables such as `--bg`, `--panel`, `--text`,
-`--border`):
+`--border`). `--language ca` (or `es`; `language=` in Python) shows the
+interface in Catalan or Spanish; the data isn't translated:
 
 ```bash
-python -m cvcdocdb.viewer graph.pkl --layout light --load-all --accent '#00843D' --css my-app.css
+python -m cvcdocdb.viewer graph.pkl --layout light --load-all --accent '#00843D' --css my-app.css --language ca
 ```
 
 To embed the viewer in your own web application, build the self-contained
@@ -242,6 +245,7 @@ from cvcdocdb.viewer import show
 
 viewer = show(graph)                  # explore from the table and the search
 viewer = show(graph, load_all=True)   # small graphs: draw every node and relation
+viewer = show(graph, language="ca")   # interface in Catalan ("es": Spanish)
 viewer                                # last expression of the cell
 
 graph.insertNode(...)                 # after changing the graph from Python...

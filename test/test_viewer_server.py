@@ -154,6 +154,9 @@ def test_relations_endpoint(server):
     [
         ("/static/viewer.js", "text/javascript"),
         ("/static/viewer.css", "text/css"),
+        ("/static/physics.js", "text/javascript"),
+        ("/static/lod.js", "text/javascript"),
+        ("/static/i18n.js", "text/javascript"),
         ("/static/vendor/cytoscape.min.js", "text/javascript"),
     ],
 )

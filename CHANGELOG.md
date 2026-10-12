@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Graph viewer: nodes repel each other.** The nodes keep a distance from
+  one another: after each layout they are spread out, and dragging a node
+  makes the others make way and pulls its neighbours along, until the canvas
+  comes to rest. **repel nodes** in the graph toolbar turns it off. The force
+  simulation is the new `static/physics.js`.
+- **Graph viewer in Catalan and Spanish.** A `language` option (`"en"`,
+  `"ca"` or `"es"`) for `show()`, `build_page()`, `create_server()`,
+  `serve_viewer()` and `--language` translates the interface texts (the data
+  and the API's error messages are not translated). The page gets a
+  `<meta name="cvcdocdb-language">`; the texts are in `static/i18n.js`.
+- **Tutorial notebooks open in Colab and Kaggle.** Each notebook starts with
+  the two badges, pointing at the notebook on `main` (the docs pages already
+  had them, so the cell is hidden there).
+- **JavaScript tests for the viewer.** The level-of-detail rules (how many
+  nodes each zoom shows, node sizes, which nodes stay shown) move to
+  `static/lod.js`, and it, `physics.js` and `i18n.js` are tested with
+  Node.js (`test/test_viewer_lod.py`, `test/test_viewer_physics.py`,
+  `test/test_viewer_i18n.py`; skipped when `node` isn't installed).
+
+### Fixed
+
+- `test_handle_api_rejects_bad_parameters` still expected a repeated `label`
+  to be rejected, which the node-type filter of 1.8.0 made valid; the case
+  now checks that an invalid label among several is rejected.
+
 ## [1.8.0] - 2026-10-11
 
 ### Added
