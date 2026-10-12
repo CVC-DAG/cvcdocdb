@@ -19,6 +19,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `serve_viewer()` and `--language` translates the interface texts (the data
   and the API's error messages are not translated). The page gets a
   `<meta name="cvcdocdb-language">`; the texts are in `static/i18n.js`.
+- **Tutorial notebooks open in Colab and Kaggle.** Each notebook starts with
+  the two badges, pointing at the notebook on `main` (the docs pages already
+  had them, so the cell is hidden there).
 - **JavaScript tests for the viewer.** The level-of-detail rules (how many
   nodes each zoom shows, node sizes, which nodes stay shown) move to
   `static/lod.js`, and it, `physics.js` and `i18n.js` are tested with
