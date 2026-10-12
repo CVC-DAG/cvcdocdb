@@ -535,11 +535,104 @@
                                 nodeRepulsion: 8000, idealEdgeLength: 80 });
     layout.one("layoutstop", function () {
       if (cy.zoom() > MAX_FIT_ZOOM) { cy.zoom(MAX_FIT_ZOOM); cy.center(); }
-      lodBaseZoom = cy.zoom();
       rankNodes();
+      // Spread the nodes out before showing them, rather than animating it.
+      if (physicsEnabled() && settlePhysics(PHYSICS_SETTLE_STEPS)) {
+        cy.fit(shown, 30);
+        if (cy.zoom() > MAX_FIT_ZOOM) { cy.zoom(MAX_FIT_ZOOM); cy.center(); }
+      }
+      lodBaseZoom = cy.zoom();
       applyLevelOfDetail();
     });
     layout.run();
+  }
+
+  // ------------------------------------------------------------------
+  // Repulsion (physics.js): the nodes keep apart, and dragging one makes
+  // the others make way and pulls its neighbours along. It runs while a
+  // node is held and after each layout, until the canvas comes to rest.
+  // ------------------------------------------------------------------
+
+  var PHYSICS_STEPS_PER_FRAME = 4;
+  var PHYSICS_REST = 0.05;       // largest move per step that counts as at rest
+  var PHYSICS_MAX_FRAMES = 600;  // stop anyway ~10 s after the last touch (60 frames/s)
+  var PHYSICS_SETTLE_STEPS = 400;
+  var physicsFrame = null;
+  var physicsFrames = 0;
+  var velocities = {};
+
+  function physicsEnabled() { return $("physics-toggle").checked; }
+
+  function startPhysics() {
+    physicsFrames = 0;
+    if (physicsFrame === null && physicsEnabled()) physicsFrame = window.requestAnimationFrame(physicsTick);
+  }
+
+  function stopPhysics() {
+    if (physicsFrame !== null) window.cancelAnimationFrame(physicsFrame);
+    physicsFrame = null;
+    velocities = {};
+  }
+
+  /** The shown nodes as simulation bodies, and the shown relations between
+   * them; the held node (and any locked one) pushes and pulls without moving. */
+  function physicsWorld() {
+    var shown = cy.nodes().filter(nodeShown);
+    var index = {};
+    var bodies = shown.map(function (node, i) {
+      index[node.id()] = i;
+      var p = node.position();
+      var v = velocities[node.id()] || { vx: 0, vy: 0 };
+      return { x: p.x, y: p.y, vx: v.vx, vy: v.vy, radius: (node.data("size") || 22) / 2,
+               fixed: node.grabbed() || node.locked() };
+    });
+    var edges = [];
+    visibleEdges().forEach(function (edge) {
+      var s = index[edge.source().id()], t = index[edge.target().id()];
+      if (s !== undefined && t !== undefined) edges.push([s, t]);
+    });
+    return { nodes: shown, bodies: bodies, edges: edges };
+  }
+
+  /** Run up to *steps* steps of the simulation; returns the largest move of the last one. */
+  function runPhysics(world, steps) {
+    var moved = 0;
+    for (var k = 0; k < steps; k++) {
+      moved = CvcdocdbPhysics.step(world.bodies, world.edges);
+      if (moved <= PHYSICS_REST) break;
+    }
+    cy.batch(function () {
+      world.nodes.forEach(function (node, i) {
+        var body = world.bodies[i];
+        velocities[node.id()] = { vx: body.vx, vy: body.vy };
+        if (!body.fixed) node.position({ x: body.x, y: body.y });
+      });
+    });
+    return moved;
+  }
+
+  /** Settle the canvas at once (no animation); returns whether it ran. */
+  function settlePhysics(steps) {
+    var world = physicsWorld();
+    if (world.bodies.length < 2) return false;
+    runPhysics(world, steps);
+    velocities = {};
+    return true;
+  }
+
+  function physicsTick() {
+    physicsFrame = null;
+    if (!physicsEnabled()) return;
+    var world = physicsWorld();
+    if (world.bodies.length < 2) return;
+    var held = world.nodes.some(function (node) { return node.grabbed(); });
+    var moved = runPhysics(world, PHYSICS_STEPS_PER_FRAME);
+    physicsFrames++;
+    if (held || (moved > PHYSICS_REST && physicsFrames < PHYSICS_MAX_FRAMES)) {
+      physicsFrame = window.requestAnimationFrame(physicsTick);
+    } else {
+      velocities = {};
+    }
   }
 
   function expand(id) {
@@ -661,6 +754,7 @@
     scheduleLevelOfDetail();
   });
   cy.on("zoom", scheduleLevelOfDetail);
+  cy.on("grab free", "node", startPhysics);
 
   function setTableOpen(open) {
     document.body.classList.toggle("table-open", open);
@@ -725,7 +819,11 @@
   $("graph-fit").addEventListener("click", function () { cy.fit(undefined, 30); });
   $("graph-layout").addEventListener("click", runLayout);
   $("lod-toggle").addEventListener("change", applyLevelOfDetail);
+  $("physics-toggle").addEventListener("change", function () {
+    if (physicsEnabled()) startPhysics(); else stopPhysics();
+  });
   $("graph-reset").addEventListener("click", function () {
+    stopPhysics();
     cy.elements().remove();
     lodRanked = null;
     $("graph-notice").hidden = true;

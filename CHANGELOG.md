@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Graph viewer: nodes repel each other.** The nodes keep a distance from
+  one another: after each layout they are spread out, and dragging a node
+  makes the others make way and pulls its neighbours along, until the canvas
+  comes to rest. **repel nodes** in the graph toolbar turns it off. The force
+  simulation is the new `static/physics.js`.
+- **JavaScript tests for the viewer.** `static/physics.js` is tested with
+  Node.js (`test/test_viewer_physics.py`; skipped when `node` isn't installed).
+
 ### Fixed
 
 - `test_handle_api_rejects_bad_parameters` still expected a repeated `label`

@@ -98,6 +98,9 @@
           <label class="muted" title="With many nodes, show the most connected ones when zoomed out and the rest as you zoom in">
             <input id="lod-toggle" type="checkbox" checked> detail by zoom
           </label>
+          <label class="muted" title="Nodes keep apart, and moving one makes the others make way">
+            <input id="physics-toggle" type="checkbox" checked> repel nodes
+          </label>
           <span id="graph-count" class="muted"></span>
         </div>
         <div id="graph-notice" class="banner warn" hidden></div>
@@ -115,6 +118,7 @@
   </div>
 
   <script src="static/vendor/cytoscape.min.js"></script>
+  <script src="static/physics.js"></script>
   <script src="static/viewer.js"></script>
 </body>
 </html>
