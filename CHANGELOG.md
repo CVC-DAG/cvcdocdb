@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `test_handle_api_rejects_bad_parameters` still expected a repeated `label`
+  to be rejected, which the node-type filter of 1.8.0 made valid; the case
+  now checks that an invalid label among several is rejected.
+
 ## [1.8.0] - 2026-10-11
 
 ### Added
