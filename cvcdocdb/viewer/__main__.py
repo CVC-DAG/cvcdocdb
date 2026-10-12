@@ -15,7 +15,8 @@ Common options: ``--host`` (default 127.0.0.1), ``--port`` (default 8765,
 0 = any free port), ``--token`` (or ``CVCDOCDB_VIEWER_TOKEN``) to require a
 token on the API, ``--no-browser`` not to open the page. Page look:
 ``--layout light`` (graph first), ``--load-all``, ``--accent '#RRGGBB'`` and
-``--css FILE`` (a stylesheet added after the viewer's own).
+``--css FILE`` (a stylesheet added after the viewer's own); ``--language ca``
+(or ``es``) for the interface texts.
 """
 
 from __future__ import annotations
@@ -26,7 +27,7 @@ import os
 import sys
 from typing import Any, List, Optional
 
-from .page import LAYOUTS
+from .page import LANGUAGES, LAYOUTS
 from .server import DEFAULT_HOST, DEFAULT_PORT, serve_viewer
 
 PASSWORD_ENV = "CVCDOCDB_PASSWORD"
@@ -67,6 +68,8 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--load-all", action="store_true", help="Draw the whole graph on start (up to 300 nodes)")
     parser.add_argument("--accent", help="Accent colour of the page, e.g. '#00843D'")
     parser.add_argument("--css", metavar="FILE", help="Stylesheet added after the viewer's own")
+    parser.add_argument("--language", choices=LANGUAGES, default="en",
+                        help="Interface language (en, ca or es; default en)")
     return parser
 
 
@@ -109,7 +112,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     token = args.token if args.token is not None else os.environ.get(TOKEN_ENV) or None
     try:
         serve_viewer(store, host=args.host, port=args.port, token=token, open_browser=not args.no_browser,
-                     layout=args.layout, load_all=args.load_all, accent=args.accent, extra_css=extra_css)
+                     layout=args.layout, load_all=args.load_all, accent=args.accent, extra_css=extra_css,
+                     language=args.language)
     finally:
         store.close()
     return 0

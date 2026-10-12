@@ -47,7 +47,7 @@ __all__ = [
 ]
 
 
-def show(store: Any, height: int = 650, load_all: bool = False) -> Any:
+def show(store: Any, height: int = 650, load_all: bool = False, language: str = "en") -> Any:
     """The viewer for *store* as a Jupyter widget; make it a cell's last
     expression to display it.
 
@@ -57,6 +57,7 @@ def show(store: Any, height: int = 650, load_all: bool = False) -> Any:
         height: Height of the viewer in pixels.
         load_all: Show the whole graph on the canvas (up to 300 nodes), for
             small graphs such as a tutorial's.
+        language: Interface language: ``"en"`` (default), ``"ca"`` or ``"es"``.
 
     Call ``refresh()`` on the returned widget after changing the graph.
 
@@ -69,4 +70,4 @@ def show(store: Any, height: int = 650, load_all: bool = False) -> Any:
     # Imported here so the rest of the viewer doesn't need anywidget.
     from .notebook import GraphViewerWidget
 
-    return GraphViewerWidget(store, height=height, load_all=load_all)
+    return GraphViewerWidget(store, height=height, load_all=load_all, language=language)

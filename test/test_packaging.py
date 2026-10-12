@@ -33,6 +33,9 @@ EXTRAS = {
 VIEWER_STATIC_FILES = (
     "index.html",
     "viewer.js",
+    "physics.js",
+    "lod.js",
+    "i18n.js",
     "viewer.css",
     "widget.js",
     "vendor/cytoscape.min.js",
