@@ -14,8 +14,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   makes the others make way and pulls its neighbours along, until the canvas
   comes to rest. **repel nodes** in the graph toolbar turns it off. The force
   simulation is the new `static/physics.js`.
-- **JavaScript tests for the viewer.** `static/physics.js` is tested with
-  Node.js (`test/test_viewer_physics.py`; skipped when `node` isn't installed).
+- **JavaScript tests for the viewer.** The level-of-detail rules (how many
+  nodes each zoom shows, node sizes, which nodes stay shown) move to
+  `static/lod.js`, and both it and `physics.js` are tested with Node.js
+  (`test/test_viewer_lod.py`, `test/test_viewer_physics.py`; skipped when
+  `node` isn't installed).
 
 ### Fixed
 

@@ -141,7 +141,7 @@ def build_page(layout: str = "classic", load_all: bool = False, accent: Optional
         '<script src="static/vendor/cytoscape.min.js"></script>',
         _script(_static_text("vendor/cytoscape.min.js")),
     )
-    for name in ("physics.js",):
+    for name in ("physics.js", "lod.js"):
         page = _replace_once(page, f'<script src="static/{name}"></script>', _script(_static_text(name)))
     page = _replace_once(
         page,

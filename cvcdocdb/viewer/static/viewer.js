@@ -422,44 +422,38 @@
   // connected ones (drawn bigger); zooming in reveals the rest.
   // ------------------------------------------------------------------
 
-  var LOD_MIN_NODES = 40;        // up to this many, always all of them
-  var LOD_BASE_FRACTION = 0.25;  // share shown at the zoom of the last layout
+  // The rules (how many, how big, which) are in lod.js.
   var lodBaseZoom = null;
   var lodRanked = null;          // filtered canvas nodes, most connected first
   var lodFrame = null;
 
   function lodEnabled() { return $("lod-toggle").checked; }
 
-  /** Rank the nodes by degree and size them by it (after each layout): the
-   * square root keeps hubs clearly bigger without dwarfing everything else. */
+  /** Rank the nodes by degree and size them by it (after each layout). */
   function rankNodes() {
-    var nodes = cy.nodes().not(".hidden-label");
-    lodRanked = nodes.sort(function (a, b) { return b.degree(false) - a.degree(false); });
-    var top = lodRanked.length ? Math.max(1, lodRanked[0].degree(false)) : 1;
-    lodRanked.forEach(function (node) {
-      node.data("size", 14 + Math.round(30 * Math.sqrt(node.degree(false) / top)));
+    var ranked = CvcdocdbLod.rank(cy.nodes().not(".hidden-label").map(function (node) {
+      return { node: node, degree: node.degree(false) };
+    }));
+    var top = ranked.length ? ranked[0].degree : 0;
+    lodRanked = ranked.map(function (entry) {
+      entry.node.data("size", CvcdocdbLod.nodeSize(entry.degree, top));
+      return entry.node;
     });
-  }
-
-  /** How many of *total* ranked nodes to show at *ratio* times the base zoom. */
-  function lodKeepCount(total, ratio) {
-    if (total <= LOD_MIN_NODES) return total;
-    return Math.max(LOD_MIN_NODES, Math.ceil(total * Math.min(1, LOD_BASE_FRACTION * ratio)));
   }
 
   function applyLevelOfDetail() {
     lodFrame = null;
     if (!lodRanked) return;
     var on = lodEnabled() && lodBaseZoom;
-    var keep = on ? lodKeepCount(lodRanked.length, cy.zoom() / lodBaseZoom) : lodRanked.length;
+    var keep = on ? CvcdocdbLod.keepCount(lodRanked.length, cy.zoom() / lodBaseZoom) : lodRanked.length;
     // Always shown: the selected node, its neighbours and the expanded nodes.
     var selected = cy.nodes(":selected");
-    var pinned = selected.union(selected.neighborhood().nodes()).union(cy.nodes(".expanded"));
+    var pinned = new Set(selected.union(selected.neighborhood().nodes()).union(cy.nodes(".expanded"))
+      .map(function (node) { return node.id(); }));
+    var hidden = new Set(CvcdocdbLod.hiddenIds(lodRanked.map(function (node) { return node.id(); }), keep, pinned));
     cy.batch(function () {
       cy.nodes(".hidden-label").removeClass("lod-hidden");
-      lodRanked.forEach(function (node, i) {
-        node.toggleClass("lod-hidden", i >= keep && !pinned.contains(node));
-      });
+      lodRanked.forEach(function (node) { node.toggleClass("lod-hidden", hidden.has(node.id())); });
     });
     updateGraphCount(false);
   }

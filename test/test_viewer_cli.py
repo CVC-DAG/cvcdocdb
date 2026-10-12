@@ -16,6 +16,7 @@ STATIC_FILES = (
     "index.html",
     "viewer.js",
     "physics.js",
+    "lod.js",
     "viewer.css",
     "vendor/cytoscape.min.js",
     "vendor/cytoscape.LICENSE.txt",
@@ -38,7 +39,7 @@ def test_vendored_cytoscape_keeps_its_license_notice():
 
 def test_front_end_makes_no_external_requests():
     static = resources.files("cvcdocdb.viewer") / "static"
-    for name in ("index.html", "viewer.js", "physics.js", "viewer.css"):
+    for name in ("index.html", "viewer.js", "physics.js", "lod.js", "viewer.css"):
         text = (static / name).read_text("utf-8")
         assert "http://" not in text and "https://" not in text, name
 

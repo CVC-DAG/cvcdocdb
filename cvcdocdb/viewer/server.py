@@ -52,6 +52,7 @@ _LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
 _STATIC_FILES = {
     "viewer.js": "text/javascript; charset=utf-8",
     "physics.js": "text/javascript; charset=utf-8",
+    "lod.js": "text/javascript; charset=utf-8",
     "viewer.css": "text/css; charset=utf-8",
     "vendor/cytoscape.min.js": "text/javascript; charset=utf-8",
     "vendor/cytoscape.LICENSE.txt": "text/plain; charset=utf-8",
