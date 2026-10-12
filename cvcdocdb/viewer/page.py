@@ -17,6 +17,8 @@ Options shared with the HTTP server (:func:`page_attributes`):
   host application.
 * ``extra_css`` — a stylesheet added after the viewer's own, so a host can
   give the page its look (fonts, colours via the ``--*`` variables, radii).
+* ``language`` — interface language: ``"en"`` (default), ``"ca"`` or ``"es"``.
+  The data and the API's error messages are not translated.
 """
 
 from __future__ import annotations
@@ -25,10 +27,13 @@ import re
 from importlib import resources
 from typing import Optional
 
-__all__ = ["LAYOUTS", "accent_style", "build_page", "extra_style", "page_attributes", "with_options"]
+__all__ = ["LANGUAGES", "LAYOUTS", "accent_style", "build_page", "extra_style", "language_meta", "page_attributes",
+           "with_options"]
 
 #: Page layouts.
 LAYOUTS = ("classic", "light")
+#: Interface languages (the texts are in static/i18n.js).
+LANGUAGES = ("en", "ca", "es")
 
 # The frame only runs the inlined scripts and styles: no network at all.
 _CSP = (
@@ -99,11 +104,27 @@ def extra_style(extra_css: Optional[str]) -> str:
     return f"<style>{extra_css}</style>"
 
 
+def language_meta(language: str) -> str:
+    """The ``<meta>`` element that sets the interface language, or ``""`` for English.
+
+    It goes in ``<head>``, not on ``<html>``, whose tag the notebook widget
+    rewrites.
+
+    Raises:
+        ValueError: If *language* isn't one of :data:`LANGUAGES`.
+    """
+    if language not in LANGUAGES:
+        raise ValueError(f"language must be one of {', '.join(LANGUAGES)}")
+    if language == "en":
+        return ""
+    return f'<meta name="cvcdocdb-language" content="{language}">'
+
+
 def with_options(page: str, layout: str = "classic", load_all: bool = False, accent: Optional[str] = None,
-                 extra_css: Optional[str] = None) -> str:
+                 extra_css: Optional[str] = None, language: str = "en") -> str:
     """*page* (the viewer's ``index.html``, plain or inlined) with the options applied."""
     attrs = page_attributes(layout, load_all)
-    style = accent_style(accent) + extra_style(extra_css)
+    style = language_meta(language) + accent_style(accent) + extra_style(extra_css)
     if attrs:
         page = _replace_once(page, _HTML_TAG, _HTML_TAG[:-1] + attrs + ">")
     if style:
@@ -112,7 +133,7 @@ def with_options(page: str, layout: str = "classic", load_all: bool = False, acc
 
 
 def build_page(layout: str = "classic", load_all: bool = False, accent: Optional[str] = None,
-               extra_css: Optional[str] = None) -> str:
+               extra_css: Optional[str] = None, language: str = "en") -> str:
     """The viewer page with its styles and scripts inlined, set to ask its
     parent window for data instead of the HTTP API.
 
@@ -121,9 +142,10 @@ def build_page(layout: str = "classic", load_all: bool = False, accent: Optional
         load_all: Draw the whole graph on start (up to 300 nodes).
         accent: Accent colour, ``#RGB`` or ``#RRGGBB``.
         extra_css: A stylesheet added after the viewer's own (host look).
+        language: Interface language, one of :data:`LANGUAGES`.
 
     Raises:
-        ValueError: On an unknown *layout*, an invalid *accent* or *extra_css*.
+        ValueError: On an unknown *layout* or *language*, an invalid *accent* or *extra_css*.
     """
     page = _static_text("index.html")
     page = _replace_once(
@@ -141,11 +163,11 @@ def build_page(layout: str = "classic", load_all: bool = False, accent: Optional
         '<script src="static/vendor/cytoscape.min.js"></script>',
         _script(_static_text("vendor/cytoscape.min.js")),
     )
-    for name in ("physics.js", "lod.js"):
+    for name in ("physics.js", "lod.js", "i18n.js"):
         page = _replace_once(page, f'<script src="static/{name}"></script>', _script(_static_text(name)))
     page = _replace_once(
         page,
         '<script src="static/viewer.js"></script>',
         _script("window.CVCDOCDB_BRIDGE = true;") + _script(_static_text("viewer.js")),
     )
-    return with_options(page, layout=layout, load_all=load_all, accent=accent, extra_css=extra_css)
+    return with_options(page, layout=layout, load_all=load_all, accent=accent, extra_css=extra_css, language=language)

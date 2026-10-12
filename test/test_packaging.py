@@ -35,6 +35,7 @@ VIEWER_STATIC_FILES = (
     "viewer.js",
     "physics.js",
     "lod.js",
+    "i18n.js",
     "viewer.css",
     "widget.js",
     "vendor/cytoscape.min.js",

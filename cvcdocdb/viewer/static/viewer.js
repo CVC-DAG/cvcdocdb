@@ -15,6 +15,25 @@
   // Light layout: graph first (see viewer.css and cvcdocdb.viewer.page).
   var LIGHT = document.documentElement.getAttribute("data-layout") === "light";
 
+  // Interface language (i18n.js), from <meta name="cvcdocdb-language">.
+  var LANGUAGE_META = document.querySelector('meta[name="cvcdocdb-language"]');
+  var LANGUAGE = CvcdocdbI18n.language(LANGUAGE_META ? LANGUAGE_META.getAttribute("content") : "en");
+  function t(key, params) { return CvcdocdbI18n.translate(LANGUAGE, key, params); }
+
+  /** Put the page's own texts (data-i18n*) in the interface language. */
+  function translatePage() {
+    document.documentElement.setAttribute("lang", LANGUAGE);
+    if (LANGUAGE === "en") return;
+    [["data-i18n", null], ["data-i18n-title", "title"], ["data-i18n-placeholder", "placeholder"],
+     ["data-i18n-aria-label", "aria-label"]].forEach(function (pair) {
+      Array.prototype.forEach.call(document.querySelectorAll("[" + pair[0] + "]"), function (node) {
+        var text = t(node.getAttribute(pair[0]));
+        if (pair[1]) node.setAttribute(pair[1], text); else node.textContent = text;
+      });
+    });
+  }
+  translatePage();
+
   var state = {
     labels: [],           // node types selected in the sidebar (none = all)
     filters: [],          // [{prop, op, value}]
@@ -111,7 +130,7 @@
       delete pending[msg.id];
       clearTimeout(request.timer);
       if (msg.ok) { request.resolve(msg.body); return; }
-      var error = new Error(msg.body && msg.body.error ? msg.body.error : "Request failed");
+      var error = new Error(msg.body && msg.body.error ? msg.body.error : t("error.request"));
       error.status = msg.status;
       request.reject(error);
     });
@@ -130,7 +149,7 @@
       var id = nextRequestId++;
       var timer = setTimeout(function () {
         delete pending[id];
-        reject(new Error("No answer from the Python kernel: is it still running?"));
+        reject(new Error(t("error.kernel")));
       }, BRIDGE_TIMEOUT_MS);
       pending[id] = { resolve: resolve, reject: reject, timer: timer };
       window.parent.postMessage({ type: "cvcdocdb-api", id: id, path: path, params: pairs }, "*");
@@ -151,7 +170,7 @@
         return response.json().catch(function () { return {}; }).then(function (body) {
           if (!response.ok) {
             var msg = body && body.error ? body.error : response.statusText;
-            if (response.status === 401) msg = "Unauthorized: open the viewer with ?token=<token> in the URL.";
+            if (response.status === 401) msg = t("error.unauthorized");
             var error = new Error(msg);
             error.status = response.status;
             throw error;
@@ -167,12 +186,12 @@
 
   function loadSummary() {
     return api("api/summary").then(function (summary) {
-      $("store-info").textContent = summary.backend + " · " + summary.node_count + " nodes · " +
-        summary.relation_count + " relations";
+      $("store-info").textContent = t("status.store", { backend: summary.backend, nodes: summary.node_count,
+                                                        relations: summary.relation_count });
       assignLabelColors(summary.labels.map(function (entry) { return entry.label; }));
       var labels = $("label-list");
       clear(labels);
-      labels.appendChild(facet("All nodes", summary.node_count, null, !state.labels.length, function () {
+      labels.appendChild(facet(t("labels.all"), summary.node_count, null, !state.labels.length, function () {
         setLabels([]);
       }));
       summary.labels.forEach(function (entry) {
@@ -181,7 +200,7 @@
       });
       var rels = $("relation-list");
       clear(rels);
-      if (!summary.relation_types.length) rels.appendChild(el("li", { className: "muted", text: "none" }));
+      if (!summary.relation_types.length) rels.appendChild(el("li", { className: "muted", text: t("relations.none") }));
       summary.relation_types.forEach(function (entry) {
         var box = el("input", { type: "checkbox" });
         box.checked = !state.hiddenTypes[entry.type];
@@ -235,16 +254,16 @@
   // Filters and results
   // ------------------------------------------------------------------
 
-  var OP_TEXT = { eq: "=", ne: "≠", contains: "contains", gt: ">", gte: "≥", lt: "<", lte: "≤", exists: "exists" };
+  var OP_TEXT = { eq: "=", ne: "≠", contains: t("op.contains"), gt: ">", gte: "≥", lt: "<", lte: "≤", exists: t("op.exists") };
 
   function renderChips() {
     var chips = $("filter-chips");
     clear(chips);
     state.labels.forEach(function (label) {
-      chips.appendChild(chip([swatch(label), " label: " + label], function () { toggleLabel(label); }));
+      chips.appendChild(chip([swatch(label), " " + t("filter.label_chip", { label: label })], function () { toggleLabel(label); }));
     });
     if (state.text) {
-      chips.appendChild(chip(["text: “" + state.text + "”"], function () {
+      chips.appendChild(chip([t("filter.text_chip", { text: state.text })], function () {
         state.text = ""; $("search-text").value = ""; state.offset = 0; renderChips(); search();
       }));
     }
@@ -258,7 +277,7 @@
 
   function chip(content, onRemove) {
     return el("span", { className: "chip" }, content.concat([
-      el("button", { type: "button", title: "Remove", "aria-label": "Remove filter", text: "×", onclick: onRemove })
+      el("button", { type: "button", title: t("filter.remove"), "aria-label": t("filter.remove_label"), text: "×", onclick: onRemove })
     ]));
   }
 
@@ -285,12 +304,12 @@
         return [el("b", { text: key }), ": " + formatValue(item.properties[key]) + "  "];
       });
       var row = el("tr", { className: item.id === state.selectedId ? "selected" : "" }, [
-        el("td", { text: item.caption, title: "id " + item.id }),
+        el("td", { text: item.caption, title: t("detail.id", { id: item.id }) }),
         el("td", null, [el("span", { className: "label-tag" }, [swatch(item.main_label), item.main_label])]),
         el("td", { className: "props" }, [].concat.apply([], props)),
         el("td", null, [el("button", {
-          type: "button", className: "secondary", text: "Graph",
-          title: "Add to the graph and show its neighbours",
+          type: "button", className: "secondary", text: t("table.graph"),
+          title: t("table.graph_title"),
           onclick: function (event) { event.stopPropagation(); addNodes([item], true); expand(item.id); }
         })])
       ]);
@@ -300,7 +319,7 @@
     $("results-empty").hidden = state.items.length > 0;
     var from = state.total ? state.offset + 1 : 0;
     var to = state.offset + state.items.length;
-    $("page-info").textContent = from + "–" + to + " of " + state.total + (state.exact ? "" : "+");
+    $("page-info").textContent = t("pager.info", { from: from, to: to, total: state.total }) + (state.exact ? "" : "+");
     $("page-prev").disabled = state.offset === 0;
     $("page-next").disabled = to >= state.total;
     var options = $("known-props");
@@ -333,12 +352,12 @@
       panel.appendChild(el("div", null, node.labels.map(function (label) {
         return el("span", { className: "label-tag" }, [swatch(label), label + "  "]);
       })));
-      panel.appendChild(el("div", { className: "muted", text: "id " + node.id }));
+      panel.appendChild(el("div", { className: "muted", text: t("detail.id", { id: node.id }) }));
       panel.appendChild(el("div", { className: "actions" }, [
-        el("button", { type: "button", text: "Expand neighbours", onclick: function () {
+        el("button", { type: "button", text: t("detail.expand"), onclick: function () {
           addNodes([node], false); expand(node.id);
         } }),
-        el("button", { type: "button", className: "secondary", text: "Focus", onclick: function () {
+        el("button", { type: "button", className: "secondary", text: t("detail.focus"), onclick: function () {
           var n = cy.getElementById(String(node.id));
           if (n.nonempty()) cy.animate({ center: { eles: n }, zoom: Math.max(cy.zoom(), 1.2) }, { duration: 250 });
         } })
@@ -346,8 +365,8 @@
       var rows = [];
       if (node.pk) rows.push(["pk", formatValue(node.pk)]);
       Object.keys(node.properties).forEach(function (key) { rows.push([key, formatValue(node.properties[key])]); });
-      panel.appendChild(el("h3", { text: "Properties" }));
-      if (!rows.length) panel.appendChild(el("p", { className: "muted", text: "No properties." }));
+      panel.appendChild(el("h3", { text: t("detail.properties") }));
+      if (!rows.length) panel.appendChild(el("p", { className: "muted", text: t("detail.no_properties") }));
       else panel.appendChild(el("table", null, rows.map(function (r) {
         return el("tr", null, [el("td", { className: "key", text: r[0] }), el("td", { className: "value", text: r[1] })]);
       })));
@@ -466,13 +485,12 @@
     var total = cy.nodes().length;
     var filtered = cy.nodes().not(".hidden-label").length;
     var shown = cy.nodes().filter(nodeShown).length;
-    var nodes = shown === total ? String(shown) : shown + " of " + total;
-    var more = shown < filtered ? " (zoom in for more)" : "";
-    $("graph-count").textContent = nodes + " nodes · " + visibleEdges().length + " relations shown" + more;
+    var nodes = shown === total ? String(shown) : t("graph.some_of", { shown: shown, total: total });
+    var more = shown < filtered ? t("graph.zoom_more") : "";
+    $("graph-count").textContent = t("graph.count", { nodes: nodes, relations: visibleEdges().length }) + more;
     var notice = $("graph-notice");
     if (capped) {
-      notice.textContent = "Display limit reached (" + MAX_RENDERED_NODES +
-        " nodes): some nodes were not added. Clear the graph or work from the table.";
+      notice.textContent = t("graph.cap", { max: MAX_RENDERED_NODES });
       notice.hidden = false;
     } else if (cy.nodes().length < MAX_RENDERED_NODES) {
       notice.hidden = true;
@@ -632,7 +650,7 @@
   function expand(id) {
     var direction = $("expand-direction").value;
     var types = Object.keys(state.hiddenTypes).length ? visibleTypes() : [null];
-    if (!types.length) { showError("All relation types are unticked: nothing to follow."); return Promise.resolve(); }
+    if (!types.length) { showError(t("error.no_types")); return Promise.resolve(); }
     var source = cy.getElementById(String(id));
     return Promise.all(types.map(function (type) {
       return api("api/nodes/" + encodeURIComponent(id) + "/neighbours",
@@ -650,7 +668,7 @@
       updateGraphCount(false);
       if (truncated) {
         var notice = $("graph-notice");
-        notice.textContent = "Only the first " + NEIGHBOUR_LIMIT + " relations of this node are shown.";
+        notice.textContent = t("graph.neighbour_cap", { max: NEIGHBOUR_LIMIT });
         notice.hidden = false;
       }
     }).catch(function (err) { showError(err.message); });
@@ -779,7 +797,7 @@
     var prop = $("filter-prop").value.trim();
     var op = $("filter-op").value;
     var value = $("filter-value").value;
-    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(prop)) { showError("Property names are letters, digits and '_'."); return; }
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(prop)) { showError(t("error.property_name")); return; }
     state.filters.push({ prop: prop, op: op, value: op === "exists" ? "" : value });
     $("filter-prop").value = ""; $("filter-value").value = "";
     state.offset = 0;
@@ -825,7 +843,7 @@
   });
 
   loadSummary().then(search).then(function () { if (LOAD_ALL) return loadWholeGraph(); }).catch(function (err) {
-    $("store-info").textContent = "Not connected";
+    $("store-info").textContent = t("status.not_connected");
     showError(err.message);
   });
   updateGraphCount(false);

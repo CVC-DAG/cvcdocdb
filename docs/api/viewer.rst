@@ -27,6 +27,7 @@ and make :func:`~cvcdocdb.viewer.show` the last expression of a cell:
 
    viewer = show(graph)             # explore from the table and the search
    viewer = show(graph, load_all=True)   # small graphs: draw every node and relation
+   viewer = show(graph, language="ca")   # interface in Catalan ("es": Spanish)
 
 It is an anywidget widget, so it can run in JupyterLab, Jupyter Notebook 7,
 VS Code and Colab (so far it has been tested in JupyterLab), and it follows the
@@ -61,7 +62,9 @@ library:
 The remote password is read from ``CVCDOCDB_PASSWORD`` (or asked for). The
 server binds to ``127.0.0.1:8765`` by default (``--host``, ``--port``); use
 ``--token`` (or ``CVCDOCDB_VIEWER_TOKEN``) to require a token on the API, and
-``--no-browser`` not to open the page. From Python:
+``--no-browser`` not to open the page, and ``--language ca`` (or ``es``) for
+the interface texts in Catalan or Spanish (the data isn't translated). From
+Python:
 
 .. code-block:: python
 
