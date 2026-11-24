@@ -228,6 +228,32 @@ td.props b { color: var(--text); font-weight: 500; }
 }
 .pager #add-page-to-graph { margin-left: auto; }
 
+/* Cypher search: its result table takes the place of the search results. */
+textarea {
+  font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color: inherit;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 8px;
+  width: 100%;
+  box-sizing: border-box;
+  resize: vertical;
+  min-width: 0;
+}
+.cypher { display: flex; flex-direction: column; gap: 6px; }
+.cypher .hint { margin: 0; }
+.cypher-result { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.cypher-result[hidden] { display: none; }
+.cypher-result .filter-bar { justify-content: space-between; }
+.cypher-actions { display: flex; gap: 6px; }
+.results-panel.cypher-mode > .filter-bar,
+.results-panel.cypher-mode > .table-wrap,
+.results-panel.cypher-mode > .pager { display: none; }
+#cypher-table td { font-size: 12px; max-width: 360px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#cypher-table tbody tr { cursor: default; }
+#cypher-table td.node-cell { cursor: pointer; }
+
 .graph-toolbar {
   display: flex;
   flex-wrap: wrap;

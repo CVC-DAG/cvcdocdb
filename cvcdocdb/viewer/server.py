@@ -11,6 +11,7 @@ Routes (``GET`` only — anything else gets ``405``):
 * ``/api/nodes/<id>/neighbours?direction=&type=&limit=`` —
   :meth:`GraphViewerData.neighbours`.
 * ``/api/relations?ids=<id>&ids=<id>...`` — :meth:`GraphViewerData.relations_among`.
+* ``/api/cypher?q=<read-only Cypher>&limit=`` — :meth:`GraphViewerData.cypher`.
 
 When a *token* is configured, every ``/api`` request must carry it as
 ``?token=`` or ``Authorization: Bearer <token>`` (``401`` otherwise). The

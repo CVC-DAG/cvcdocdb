@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Graph viewer: Cypher search.** A **Cypher query** box in the sidebar
+  runs a read-only query and shows the result as a table; **Draw nodes in the
+  graph** puts the returned nodes (and the relations among them) on the
+  canvas. New `GraphViewerData.cypher(text, limit)` and
+  `GET /api/cypher?q=&limit=`. Only read-only Cypher is accepted
+  (`is_read_only_cypher`: `CREATE`, `MERGE`, `SET`, `DELETE`, `REMOVE`,
+  `CALL`, `LOAD CSV` are refused), the text is limited to 2000 characters and
+  the result to `max_cypher_rows` rows (new `GraphViewerData` argument,
+  default 1000). Returned nodes carry no id in a Cypher result, so they are
+  matched to the viewer's nodes by label and properties; those without a
+  unique match, or past `max_cypher_nodes` (default 150), stay in the table.
+
 ## [1.9.0] - 2026-10-12
 
 ### Added

@@ -327,6 +327,80 @@
     Object.keys(state.knownProps).sort().forEach(function (prop) { options.appendChild(el("option", { value: prop })); });
   }
 
+  // ------------------------------------------------------------------
+  // Cypher search (read-only; the server refuses anything that writes)
+  // ------------------------------------------------------------------
+
+  var cypherResult = null;
+
+  function cypherCell(cell) {
+    var td = el("td");
+    if (cell && typeof cell === "object" && cell.kind === "node") {
+      var label = cell.labels && cell.labels.length ? cell.labels[0] : "Node";
+      td.appendChild(el("span", { className: "label-tag" }, [swatch(label), label + " " + cell.caption]));
+      td.title = Object.keys(cell.properties).map(function (key) {
+        return key + ": " + formatValue(cell.properties[key]);
+      }).join("\n");
+      if (cell.id !== null && cell.id !== undefined) {
+        td.className = "node-cell";
+        td.addEventListener("click", function () { showDetail(cell.id); });
+      }
+    } else if (cell && typeof cell === "object" && cell.kind === "relation") {
+      var props = Object.keys(cell.properties).map(function (key) { return key + ": " + formatValue(cell.properties[key]); });
+      td.textContent = "[:" + cell.relation_type + (props.length ? " {" + props.join(", ") + "}" : "") + "]";
+    } else {
+      td.textContent = formatValue(cell);
+    }
+    return td;
+  }
+
+  function renderCypherResult(result) {
+    cypherResult = result;
+    var head = $("cypher-table").querySelector("thead");
+    var body = $("cypher-table").querySelector("tbody");
+    clear(head); clear(body);
+    head.appendChild(el("tr", null, result.columns.map(function (name) { return el("th", { text: name }); })));
+    result.rows.forEach(function (row) {
+      body.appendChild(el("tr", null, row.map(cypherCell)));
+    });
+    $("cypher-empty").hidden = result.rows.length > 0;
+    var info = result.truncated ? t("cypher.info_more", { rows: result.rows.length }) : t("cypher.info", { rows: result.rows.length });
+    if (result.nodes.length) info += " · " + t("cypher.info_nodes", { drawable: result.nodes.length });
+    if (result.unresolved) info += " · " + t("cypher.info_unmatched", { unmatched: result.unresolved });
+    $("cypher-info").textContent = info;
+    $("cypher-draw").disabled = result.nodes.length === 0;
+    $("cypher-result").hidden = false;
+    document.querySelector(".results-panel").classList.add("cypher-mode");
+  }
+
+  function closeCypherResult() {
+    cypherResult = null;
+    $("cypher-result").hidden = true;
+    document.querySelector(".results-panel").classList.remove("cypher-mode");
+  }
+
+  function runCypher() {
+    var text = $("cypher-text").value.trim();
+    if (!text) { showError(t("cypher.empty_query")); return Promise.resolve(); }
+    return api("api/cypher", [["q", text]]).then(function (result) {
+      showError(null);
+      if (LIGHT) setTableOpen(true);
+      renderCypherResult(result);
+    }).catch(function (err) { showError(err.message); });
+  }
+
+  /** Put the nodes of the Cypher result on the canvas, with the relations among them. */
+  function drawCypherNodes() {
+    if (!cypherResult || !cypherResult.nodes.length) return Promise.resolve();
+    var capped = addNodes(cypherResult.nodes, false);
+    var ids = cy.nodes().map(function (n) { return n.data("nodeId"); });
+    return api("api/relations", ids.map(function (id) { return ["ids", id]; })).then(function (result) {
+      result.relations.forEach(addEdge);
+      runLayout();
+      updateGraphCount(capped || result.truncated);
+    }).catch(function (err) { showError(err.message); });
+  }
+
   function rememberProps(item) {
     Object.keys(item.properties || {}).forEach(function (key) { state.knownProps[key] = true; });
   }
@@ -791,6 +865,16 @@
     renderChips();
     search();
   });
+
+  $("cypher-form").addEventListener("submit", function (event) {
+    event.preventDefault();
+    runCypher();
+  });
+  $("cypher-text").addEventListener("keydown", function (event) {
+    if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) { event.preventDefault(); runCypher(); }
+  });
+  $("cypher-draw").addEventListener("click", drawCypherNodes);
+  $("cypher-close").addEventListener("click", closeCypherResult);
 
   $("filter-form").addEventListener("submit", function (event) {
     event.preventDefault();

@@ -25,6 +25,15 @@
         </div>
       </form>
 
+      <form id="cypher-form" class="cypher" autocomplete="off">
+        <label for="cypher-text" class="section-title" data-i18n="cypher.title">Cypher query</label>
+        <textarea id="cypher-text" rows="3" maxlength="2000" spellcheck="false" placeholder="MATCH (n:Person)-[r]->(m) RETURN n, r, m LIMIT 25" aria-describedby="cypher-hint"></textarea>
+        <div class="row">
+          <button type="submit" data-i18n="cypher.run">Run</button>
+        </div>
+        <p id="cypher-hint" class="hint" data-i18n="cypher.hint">Read-only: queries that write or call procedures are refused.</p>
+      </form>
+
       <section>
         <div class="section-title" data-i18n="labels.title">Node labels</div>
         <ul id="label-list" class="facet-list"></ul>
@@ -40,6 +49,19 @@
 
     <main class="main">
       <section class="panel results-panel">
+        <div id="cypher-result" class="cypher-result" hidden>
+          <div class="filter-bar">
+            <span id="cypher-info" class="muted"></span>
+            <span class="cypher-actions">
+              <button id="cypher-draw" type="button" data-i18n="cypher.draw">Draw nodes in the graph</button>
+              <button id="cypher-close" type="button" class="secondary" data-i18n="cypher.close">Back to search</button>
+            </span>
+          </div>
+          <div class="table-wrap">
+            <table id="cypher-table"><thead></thead><tbody></tbody></table>
+            <p id="cypher-empty" class="muted center" data-i18n="cypher.empty" hidden>The query returned no rows.</p>
+          </div>
+        </div>
         <div class="filter-bar">
           <div id="filter-chips" class="chips"></div>
           <form id="filter-form" class="filter-form" autocomplete="off">
