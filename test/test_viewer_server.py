@@ -313,3 +313,20 @@ def test_serve_viewer_runs_until_shutdown(store, monkeypatch):
     monkeypatch.setattr(server_module.ViewerServer, "serve_forever", fake_serve_forever)
     serve_viewer(store, port=0, open_browser=False)
     assert seen["url"].startswith("http://127.0.0.1:")
+
+
+def test_cypher_endpoint(server):
+    status, _, body = _request(server, "/api/cypher?q=" + quote("MATCH (p:Person) RETURN p.name AS name ORDER BY name"))
+    assert status == 200
+    assert json.loads(body)["rows"] == [["Alice"], ["Bob"]]
+
+
+def test_cypher_endpoint_is_read_only(server, store):
+    status, _, _ = _request(server, "/api/cypher?q=" + quote("MATCH (n) DETACH DELETE n"))
+    assert status == 400
+    assert len(store.query("MATCH (n) RETURN n")) == 3
+
+
+def test_cypher_endpoint_needs_the_token(token_server):
+    status, _, _ = _request(token_server, "/api/cypher?q=" + quote("MATCH (n) RETURN n"))
+    assert status == 401

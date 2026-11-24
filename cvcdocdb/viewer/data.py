@@ -31,6 +31,7 @@ import threading
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from ..graph_store import GraphStore
+from ..text2cypher import is_read_only_cypher
 
 __all__ = [
     "GraphViewerData",
@@ -61,6 +62,16 @@ MAX_IDENTIFIER_LENGTH = 128
 SUMMARY_STRING_LENGTH = 200
 DETAIL_STRING_LENGTH = 20000
 MAX_LIST_ITEMS = 100
+#: Longest Cypher text :meth:`GraphViewerData.cypher` accepts.
+MAX_CYPHER_LENGTH = 2000
+#: Default and maximum rows :meth:`GraphViewerData.cypher` returns.
+DEFAULT_CYPHER_ROWS = 200
+DEFAULT_MAX_CYPHER_ROWS = 1000
+#: Most distinct nodes of one Cypher result that are matched to viewer ids
+#: (so they can be put on the canvas); the rest stay in the table only.
+DEFAULT_MAX_CYPHER_NODES = 150
+#: Longest string property used to match a returned node to its viewer id.
+MAX_MATCH_STRING = 200
 
 #: Keys NetworkXGraph keeps next to the real properties of a node.
 _INTERNAL_KEYS = ("pk", "main_label", "labels")
@@ -233,6 +244,9 @@ class GraphViewerData:
             total it reports is a lower bound past this.
         max_neighbours: Most relations :meth:`neighbours` returns.
         max_relations: Most relations :meth:`relations_among` returns.
+        max_cypher_rows: Most rows :meth:`cypher` returns.
+        max_cypher_nodes: Most distinct nodes of one :meth:`cypher` result
+            that are matched to viewer ids (to draw them).
     """
 
     def __init__(
@@ -242,9 +256,12 @@ class GraphViewerData:
         max_scan: int = DEFAULT_MAX_SCAN,
         max_neighbours: int = DEFAULT_MAX_NEIGHBOURS,
         max_relations: int = DEFAULT_MAX_RELATIONS,
+        max_cypher_rows: int = DEFAULT_MAX_CYPHER_ROWS,
+        max_cypher_nodes: int = DEFAULT_MAX_CYPHER_NODES,
     ) -> None:
         for name, value in (("max_page_size", max_page_size), ("max_scan", max_scan),
-                            ("max_neighbours", max_neighbours), ("max_relations", max_relations)):
+                            ("max_neighbours", max_neighbours), ("max_relations", max_relations),
+                            ("max_cypher_rows", max_cypher_rows), ("max_cypher_nodes", max_cypher_nodes)):
             if isinstance(value, bool) or not isinstance(value, int) or value < 1:
                 raise ValueError(f"{name} must be a positive integer")
         self.store = store
@@ -252,6 +269,8 @@ class GraphViewerData:
         self.max_scan = max_scan
         self.max_neighbours = max_neighbours
         self.max_relations = max_relations
+        self.max_cypher_rows = max_cypher_rows
+        self.max_cypher_nodes = max_cypher_nodes
         self._lock = threading.Lock()
 
     # -- store access ----------------------------------------------------
@@ -542,3 +561,134 @@ class GraphViewerData:
             for row in rows[: self.max_relations]
         ]
         return {"relations": relations, "truncated": len(rows) > self.max_relations}
+
+    # -- Cypher search ----------------------------------------------------
+
+    def cypher(self, text: str, limit: int = DEFAULT_CYPHER_ROWS) -> Dict[str, Any]:
+        """Run a **read-only** Cypher query typed by the user.
+
+        Unlike the rest of this class, the text of the query is the user's.
+        What keeps it safe is: anything with a write clause, ``CALL`` or
+        ``LOAD CSV`` is refused before reaching the store
+        (:func:`cvcdocdb.text2cypher.is_read_only_cypher`), the text length
+        and the rows returned are capped, and the viewer is meant to be given
+        a store (or a copy of it) the user may read in full.
+
+        Args:
+            text: The Cypher query.
+            limit: Rows to return; capped at ``max_cypher_rows``.
+
+        Returns:
+            A dict with ``columns``, ``rows`` (one list of cells per row;
+            a node is ``{"kind": "node", "id", "labels", "caption",
+            "properties"}`` and a relation ``{"kind": "relation",
+            "relation_type", "properties"}``, the rest plain JSON values),
+            ``truncated`` (more rows than returned), ``nodes`` (summaries of
+            the returned nodes that were matched to a viewer id, ready to
+            draw) and ``unresolved`` (returned nodes that were not matched:
+            past ``max_cypher_nodes`` or without a unique match).
+
+        Raises:
+            InvalidRequest: On empty, too long, non-read-only or invalid
+                Cypher.
+        """
+        if not isinstance(text, str) or not text.strip():
+            raise InvalidRequest("A Cypher query is required")
+        if len(text) > MAX_CYPHER_LENGTH:
+            raise InvalidRequest(f"Cypher queries are limited to {MAX_CYPHER_LENGTH} characters")
+        if not is_read_only_cypher(text):
+            raise InvalidRequest("Only read-only Cypher is allowed here (no CREATE, MERGE, SET, DELETE, REMOVE, CALL...)")
+        limit = min(_int_in_range(limit, "limit", 1), self.max_cypher_rows)
+        try:
+            records = self._cypher(text)
+        except (ValueError, TypeError, KeyError) as exc:
+            raise InvalidRequest(f"Invalid Cypher: {exc}") from None
+        except Exception as exc:  # noqa: BLE001 - backend syntax errors (Neo4j driver...)
+            if type(exc).__name__ in ("CypherSyntaxError", "ClientError"):
+                raise InvalidRequest(f"Invalid Cypher: {exc}") from None
+            raise
+
+        columns: List[str] = []
+        for record in records:
+            for key in record:
+                if str(key) not in columns:
+                    columns.append(str(key))
+        truncated = len(records) > limit
+        resolved: Dict[Tuple[Any, ...], Optional[int]] = {}
+        nodes: Dict[int, Dict[str, Any]] = {}
+        unresolved = 0
+        rows: List[List[Any]] = []
+        for record in records[:limit]:
+            row: List[Any] = []
+            for column in columns:
+                cell, summary, missed = self._shape_cypher_cell(record.get(column), resolved)
+                if summary is not None:
+                    nodes.setdefault(summary["id"], summary)
+                unresolved += missed
+                row.append(cell)
+            rows.append(row)
+        return {"columns": columns, "rows": rows, "truncated": truncated,
+                "nodes": list(nodes.values()), "unresolved": unresolved}
+
+    def _shape_cypher_cell(
+        self, value: Any, resolved: Dict[Tuple[Any, ...], Optional[int]],
+    ) -> Tuple[Any, Optional[Dict[str, Any]], int]:
+        """``(cell, node summary if it can be drawn, 1 if a node was not matched)``."""
+        if isinstance(value, dict) and "labels" in value and isinstance(value.get("properties"), dict):
+            labels = [str(label) for label in (value.get("labels") or [])]
+            raw_props = value["properties"]
+            pk, props = _split_properties(raw_props)
+            key = (tuple(labels[:1]), tuple(sorted((str(k), repr(v)) for k, v in raw_props.items()
+                                                   if isinstance(v, (str, int, float, bool)))))
+            if key not in resolved:
+                matched = sum(1 for found in resolved.values() if found is not None)
+                resolved[key] = self._match_node(labels, raw_props) if matched < self.max_cypher_nodes else None
+            node_id = resolved[key]
+            cell = {
+                "kind": "node",
+                "id": node_id,
+                "labels": labels,
+                "caption": _caption(node_id, pk, props),
+                "properties": {k: _jsonable(v, SUMMARY_STRING_LENGTH) for k, v in sorted(props.items())},
+            }
+            if node_id is None:
+                return cell, None, 1
+            summary = self._summary_of(node_id, labels, labels[0] if labels else None,
+                                       raw_props, SUMMARY_STRING_LENGTH)
+            return cell, summary, 0
+        if isinstance(value, dict) and "type" in value and ("start_node" in value or "end_node" in value):
+            return {
+                "kind": "relation",
+                "relation_type": str(value.get("type")),
+                "properties": {k: _jsonable(v, SUMMARY_STRING_LENGTH)
+                               for k, v in sorted((value.get("properties") or {}).items())},
+            }, None, 0
+        return _jsonable(value, SUMMARY_STRING_LENGTH), None, 0
+
+    def _match_node(self, labels: Sequence[str], properties: Dict[str, Any]) -> Optional[int]:
+        """The viewer id of a node returned by Cypher, or None if it can't be
+        told apart. Cypher results carry no id, so the node is looked up by
+        its label and its scalar properties; only a unique match counts."""
+        def usable(raw: Any) -> bool:
+            return isinstance(raw, (bool, int, float)) or (isinstance(raw, str) and len(raw) <= MAX_MATCH_STRING)
+
+        conditions: List[Tuple[str, str, Any]] = []
+        for name, raw in properties.items():
+            if name not in _INTERNAL_KEYS and _IDENTIFIER_RE.match(str(name)) and usable(raw):
+                conditions.append((str(name), "eq", raw))
+        pk = properties.get("pk")
+        if isinstance(pk, dict):
+            for name, raw in pk.items():
+                if _IDENTIFIER_RE.match(str(name)) and usable(raw):
+                    conditions.append((str(name), "eq", raw))
+        label = labels[0] if labels and _IDENTIFIER_RE.match(labels[0]) else None
+        if label is None and not conditions:
+            return None
+        try:
+            found = self._find(self._filter_dict(label, list(dict.fromkeys(conditions))), 2)
+        except InvalidRequest:
+            return None
+        if len(found) != 1:
+            return None
+        node_id = found[0].get("node_id")
+        return node_id if isinstance(node_id, int) and not isinstance(node_id, bool) else None

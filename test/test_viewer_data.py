@@ -410,3 +410,103 @@ def test_search_several_labels_repeated_is_harmless(data):
 def test_search_rejects_bad_or_too_many_labels(data, labels):
     with pytest.raises(InvalidRequest):
         data.search(labels=labels)
+
+
+# ----------------------------------------------------------------------
+# Cypher search (read-only)
+# ----------------------------------------------------------------------
+
+
+def test_cypher_returns_columns_and_scalar_rows(data):
+    result = data.cypher("MATCH (p:Person) RETURN p.name AS name, p.age AS age ORDER BY p.age")
+    assert result["columns"] == ["name", "age"]
+    assert result["rows"] == [["Bob", 25], ["Alice", 30], ["Carol", 41]]
+    assert result["truncated"] is False
+    assert result["nodes"] == []
+
+
+def test_cypher_node_cells_are_resolved_to_viewer_ids(data):
+    alice = _id_of(data, "Person", "Alice")
+    result = data.cypher("MATCH (p:Person) WHERE p.name = 'Alice' RETURN p")
+    [[cell]] = result["rows"]
+    assert cell["kind"] == "node"
+    assert cell["id"] == alice
+    assert cell["labels"][0] == "Person"
+    assert cell["caption"] == "Alice"
+    assert [node["id"] for node in result["nodes"]] == [alice]
+    assert result["nodes"][0]["properties"]["name"] == "Alice"
+
+
+def test_cypher_relation_cells_are_described(data):
+    result = data.cypher("MATCH (:Person)-[r:KNOWS]->(:Person) RETURN r.since AS since, type(r) AS t ORDER BY since")
+    assert result["rows"] == [[None, "KNOWS"], [2020, "KNOWS"]] or result["rows"] == [[2020, "KNOWS"], [None, "KNOWS"]]
+    cell = data.cypher("MATCH (:Person)-[r:KNOWS]->(:Person) WHERE r.since = 2020 RETURN r")["rows"][0][0]
+    assert cell["kind"] == "relation"
+    assert cell["relation_type"] == "KNOWS"
+    assert cell["properties"] == {"since": 2020}
+
+
+def test_cypher_rows_are_capped_and_flagged(store):
+    data = GraphViewerData(store, max_cypher_rows=10)
+    result = data.cypher("MATCH (i:Item) RETURN i.title AS title")
+    assert len(result["rows"]) == 10
+    assert result["truncated"] is True
+
+
+def test_cypher_limit_argument_is_capped_by_the_maximum(store):
+    data = GraphViewerData(store, max_cypher_rows=10)
+    assert len(data.cypher("MATCH (i:Item) RETURN i.title AS t", limit=500)["rows"]) == 10
+    assert len(data.cypher("MATCH (i:Item) RETURN i.title AS t", limit=3)["rows"]) == 3
+
+
+def test_cypher_nodes_on_the_canvas_are_capped(store):
+    data = GraphViewerData(store, max_cypher_nodes=5)
+    result = data.cypher("MATCH (i:Item) RETURN i")
+    assert len(result["nodes"]) == 5
+    assert result["unresolved"] >= 1
+
+
+@pytest.mark.parametrize("query", [
+    "CREATE (n:Person {name: 'Mallory'})",
+    "MATCH (n) DETACH DELETE n",
+    "MATCH (n:Person) SET n.name = 'x' RETURN n",
+    "MATCH (n) REMOVE n.name",
+    "MERGE (n:City {name: 'x'})",
+    "CALL db.labels()",
+    "LOAD CSV FROM 'http://x' AS row RETURN row",
+    "MATCH (n) FOREACH (x IN [1] | SET n.a = x)",
+    "match (n) delete n",
+])
+def test_cypher_refuses_anything_that_is_not_read_only(data, store, query):
+    before = data.summary()["node_count"]
+    with pytest.raises(InvalidRequest, match="read-only"):
+        data.cypher(query)
+    assert data.summary()["node_count"] == before
+
+
+@pytest.mark.parametrize("query", ["", "   ", None, 42])
+def test_cypher_refuses_empty_or_non_text(data, query):
+    with pytest.raises(InvalidRequest):
+        data.cypher(query)
+
+
+def test_cypher_refuses_overlong_queries(data):
+    with pytest.raises(InvalidRequest, match="limited"):
+        data.cypher("MATCH (n) RETURN n " + " " * 5000)
+
+
+def test_cypher_syntax_errors_are_a_bad_request(data):
+    with pytest.raises(InvalidRequest, match="Cypher"):
+        data.cypher("MATCH (n RETURN")
+
+
+def test_cypher_forbidden_words_inside_strings_are_fine(data):
+    result = data.cypher("MATCH (p:Person) WHERE p.name = 'CREATE' RETURN p.name AS name")
+    assert result["rows"] == []
+
+
+def test_cypher_values_are_json_safe_and_size_limited(store):
+    store.insertNode(Node(pk={"id": 500}, main_label="Doc", text="x" * 5000))
+    data = GraphViewerData(store)
+    [[cell]] = data.cypher("MATCH (d:Doc) RETURN d.text AS text")["rows"]
+    assert len(cell) < 5000

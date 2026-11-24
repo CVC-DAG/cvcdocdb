@@ -253,3 +253,14 @@ def test_show_passes_load_all(store):
 def test_page_has_a_refresh_button():
     page = build_page()
     assert 'id="graph-refresh"' in page and "cvcdocdb-refresh" in page and "data-load-all" in page
+
+
+def test_handle_api_cypher(data):
+    result = handle_api(data, "/api/cypher", {"q": ["MATCH (p:Person) RETURN p.name AS name ORDER BY name"]})
+    assert result["columns"] == ["name"]
+    assert result["rows"][0] == ["Alice"]
+
+
+def test_handle_api_cypher_needs_a_query(data):
+    with pytest.raises(InvalidRequest):
+        handle_api(data, "/api/cypher", {})

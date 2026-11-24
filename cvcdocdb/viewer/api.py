@@ -11,7 +11,7 @@ import re
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import unquote
 
-from .data import GraphViewerData, InvalidRequest
+from .data import DEFAULT_CYPHER_ROWS, GraphViewerData, InvalidRequest
 
 __all__ = ["UnknownEndpoint", "handle_api"]
 
@@ -81,6 +81,11 @@ def handle_api(data: GraphViewerData, path: str, query: Dict[str, List[str]]) ->
         )
     if path == "/api/relations":
         return data.relations_among([_parse_node_id(raw) for raw in query.get("ids", [])])
+    if path == "/api/cypher":
+        text = _single(query, "q")
+        if text is None:
+            raise InvalidRequest("Parameter 'q' (a read-only Cypher query) is required")
+        return data.cypher(text, limit=_int_param(query, "limit", DEFAULT_CYPHER_ROWS))
     match = _NEIGHBOURS_RE.match(path)
     if match:
         node_id = _parse_node_id(match.group(1))
